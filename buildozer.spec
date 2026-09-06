@@ -59,8 +59,7 @@ version = 1.0
 # продолжает пинить 2.6.1 для PyInstaller-сборки. Если конкретная
 # версия окажется нужна и recipe её поддерживает, можно уточнить здесь:
 #     requirements = python3,pygame==2.5.2
-requirements = python3, pygame-ce, jnius
-
+requirements = python3,pygame-ce,pyjnius,cython
 
 # Точка входа не меняется — main.py остаётся тем же файлом, что и на
 # Windows (см. п.18 ТЗ: не переписываем игру под другой движок/лаунчер).
