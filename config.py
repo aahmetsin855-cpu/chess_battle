@@ -83,6 +83,13 @@ _BOARD_PIXEL_BUDGET_H = _DEFAULT_BOARD_PIXEL_BUDGET
 MIN_CELL_SIZE = 34
 MAX_CELL_SIZE = 108
 
+# Множитель размера UI (шрифты, размер клеток доски) поверх базовых
+# desktop-величин выше. На desktop всегда 1.0 — ничего не меняется. На
+# Android пересчитывается в main.py._apply_screen_size() от реального
+# разрешения экрана: тот же пиксельный размер, что нормально читается на
+# desktop-мониторе, физически крошечный на высокоплотном экране телефона.
+UI_SCALE = 1.0
+
 BOARD_MARGIN_X = 30
 BOARD_MARGIN_Y = 90
 # Текущая визуальная перспектива доски. Логика игры всегда хранит
@@ -97,11 +104,37 @@ _LAYOUT_CHROME_H = BOARD_MARGIN_Y + 50
 
 
 def _clamp_cell_size(value):
-    return max(MIN_CELL_SIZE, min(MAX_CELL_SIZE, value))
+    return int(max(MIN_CELL_SIZE * UI_SCALE, min(MAX_CELL_SIZE * UI_SCALE, value)))
 
 
 CELL_SIZE = _clamp_cell_size(min(_BOARD_PIXEL_BUDGET_W // BOARD_WIDTH,
                                   _BOARD_PIXEL_BUDGET_H // BOARD_HEIGHT))
+
+
+def set_ui_scale(width_px, height_px):
+    """Пересчитывает UI_SCALE от реального разрешения экрана. Вызывается
+    ТОЛЬКО на Android (см. main.py._apply_screen_size) — на desktop
+    UI_SCALE остаётся 1.0, поведение окна не меняется.
+
+    480px по меньшей стороне — условная "базовая" высота, для которой
+    рассчитаны все текущие desktop-размеры шрифтов/клеток (обычное
+    desktop-окно игры). Телефоны в landscape обычно дают 1000-1500px по
+    меньшей стороне при высокой физической плотности пикселей — тот же
+    пиксельный размер на них физически мельче, чем на мониторе, поэтому
+    масштаб считается от отношения к этой базовой высоте, а не от
+    отношения площадей/диагоналей.
+    """
+    global UI_SCALE
+    shorter_side = min(int(width_px), int(height_px))
+    if shorter_side <= 0:
+        UI_SCALE = 1.0
+        return
+    # Осторожный первый проход: 640 базой и потолок 1.6x, а не более
+    # агрессивные значения — ширина кнопок (360px) в коде не меняется,
+    # только размер шрифта в них, и слишком большой множитель рискует
+    # вылезти текстом за края длинных подписей вроде "МУЛЬТИПЛЕЕР ПО
+    # СЕТИ". Если этого будет мало — поднимем ещё, но так безопаснее.
+    UI_SCALE = max(1.0, min(1.6, shorter_side / 640.0))
 
 
 def set_available_area(width_px, height_px):
