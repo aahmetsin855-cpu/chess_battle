@@ -30,21 +30,17 @@ jobs:
         sudo apt-get install -y git zip unzip python3-pip autoconf automake libtool libltdl-dev pkg-config zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev tk-dev build-essential libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools gstreamer1.0-x gstreamer1.0-alsa gstreamer1.0-gl gstreamer1.0-gtk3 gstreamer1.0-qt5 gstreamer1.0-pulseaudio
         pip3 install --user --upgrade buildozer Cython virtualenv
 
-    # Кэш экономит ~15-20 минут на каждой сборке после первой,
-    # т.к. Android SDK/NDK скачиваются один раз и переиспользуются
-    - name: Cache buildozer global dir
+    # Кэшируем ТОЛЬКО скачанные SDK/NDK (они не зависят от requirements
+    # и безопасны для переиспользования). Собранные под конкретные
+    # requirements пакеты (python-installs, other_builds) НЕ кешируем —
+    # именно это раньше подсунуло x86_64-бинарник pygame в ARM64-сборку.
+    - name: Cache Android SDK/NDK (buildozer platform tools only)
       uses: actions/cache@v4
       with:
-        path: ~/.buildozer
-        key: buildozer-global-${{ hashFiles('buildozer.spec') }}
-        restore-keys: buildozer-global-
-
-    - name: Cache buildozer project dir
-      uses: actions/cache@v4
-      with:
-        path: .buildozer
-        key: buildozer-project-${{ hashFiles('buildozer.spec') }}
-        restore-keys: buildozer-project-
+        path: |
+          ~/.buildozer/android/platform/android-sdk
+          ~/.buildozer/android/platform/android-ndk-r28c
+        key: buildozer-sdk-ndk-v1
 
     - name: Build with Buildozer
       run: |
