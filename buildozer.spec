@@ -59,7 +59,7 @@ version = 1.0
 # продолжает пинить 2.6.1 для PyInstaller-сборки. Если конкретная
 # версия окажется нужна и recipe её поддерживает, можно уточнить здесь:
 #     requirements = python3,pygame==2.5.2
-requirements = python3==3.11.9,hostpython3==3.11.9,cython==0.29.36,pygame==2.6.1,pyjnius
+requirements = python3==3.11.9,hostpython3==3.11.9,cython==0.29.36,pygame-ce,pyjnius
 
 # Точка входа не меняется — main.py остаётся тем же файлом, что и на
 # Windows (см. п.18 ТЗ: не переписываем игру под другой движок/лаунчер).
@@ -102,6 +102,12 @@ android.archs = arm64-v8a
 # на которой рисует сам pygame — родной Pygame-рендерер проекта не
 # переписывается, см. п. "не переписывай Pygame-рендерер" в ТЗ).
 p4a.bootstrap = sdl2
+
+# Локальный recipe pygame-ce (см. p4a-recipes/pygame-ce/__init__.py) —
+# в стоковом python-for-android до сих пор нет официального recipe для
+# pygame-ce, а старый встроенный "pygame" recipe ломается на текущих
+# NDK неразрешённым символом SSE2/NEON-блиттера при импорте на устройстве.
+p4a.local_recipes = ./p4a-recipes
 
 # Полноэкранный режим уже задаётся через fullscreen=1 выше; оставляем
 # системную навигацию Android по умолчанию (не скрываем статус-бар
