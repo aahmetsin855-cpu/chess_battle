@@ -47,7 +47,12 @@ _font_cache = {}
 
 
 def make_font(size, bold=False):
-    key = (int(size), bool(bold))
+    # UI_SCALE поднимает читаемость на телефонах: тот же пиксельный размер
+    # шрифта, что комфортно читается на десктопном мониторе, физически
+    # крошечный на высокоплотном экране телефона (см. config.UI_SCALE).
+    # На desktop UI_SCALE всегда 1.0, так что здесь ничего не меняется.
+    scaled_size = max(1, round(size * getattr(config, "UI_SCALE", 1.0)))
+    key = (scaled_size, bool(bold))
     font = _font_cache.get(key)
     if font is None:
         font = pygame.font.Font(None, key[0])
