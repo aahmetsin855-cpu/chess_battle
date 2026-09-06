@@ -43,6 +43,10 @@ jobs:
         key: buildozer-sdk-ndk-v1
 
     - name: Build with Buildozer
+      env:
+        CFLAGS: ""
+        CXXFLAGS: ""
+        LDFLAGS: ""
       run: |
         export PATH=$PATH:~/.local/bin
         git config --global --add safe.directory '*'
