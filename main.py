@@ -200,14 +200,6 @@ class App:
         # размер доски — дублировать это здесь не нужно.
         self.clock = pygame.time.Clock()
 
-        # make_font() оборачивает встроенный pygame.font.Font(None, ...) —
-        # без зависимости от системного шрифта Arial, которого на Android
-        # (и не только) может не быть (см. renderer.make_font).
-        self.font = R.make_font(17)
-        self.font_small = R.make_font(13)
-        self.font_big = R.make_font(26, bold=True)
-        self.font_mid = R.make_font(19, bold=True)
-
         # --- Настройки и память ИИ (переживают перезапуски) ---
         self.ai_memory = ai_memory.load_memory()
 
@@ -215,6 +207,18 @@ class App:
         self.selected_game_mode = self.settings.get("game_mode", config.DEFAULT_GAME_MODE)
         config.configure_board_size(self.selected_board_size)
         self._apply_screen_size()
+
+        # make_font() оборачивает встроенный pygame.font.Font(None, ...) —
+        # без зависимости от системного шрифта Arial, которого на Android
+        # (и не только) может не быть (см. renderer.make_font). ВАЖНО:
+        # создаём шрифты ПОСЛЕ _apply_screen_size(), а не до — на Android
+        # именно там считается config.UI_SCALE (см. config.set_ui_scale),
+        # и make_font() должен видеть уже актуальное значение, иначе все
+        # шрифты останутся мелкими desktop-размерами.
+        self.font = R.make_font(17)
+        self.font_small = R.make_font(13)
+        self.font_big = R.make_font(26, bold=True)
+        self.font_mid = R.make_font(19, bold=True)
 
         self.state = GameState()
         # Настоящее главное меню; Play ведёт к выбору режима.
@@ -333,7 +337,13 @@ class App:
                     # альбомная ориентация задаётся декларативно на уровне
                     # Android-манифеста (buildozer.spec: orientation =
                     # landscape), а не через размер surface здесь.
-                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                    # SCALED переключает SDL2 на её аппаратно ускоренный
+                    # render-backend (вместо софтверного surface-блиттинга),
+                    # который на Android даёт кратно другую производительность
+                    # при той же логике отрисовки через pygame.draw — без
+                    # SCALED флага SDL2 на многих Android-устройствах рисует
+                    # программно даже на мощном железе.
+                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.SCALED)
                 else:
                     # ВАЖНО: используем "оконный" (borderless) fullscreen —
                     # обычное окно без рамки, растянутое на весь рабочий стол —
@@ -346,6 +356,8 @@ class App:
                     # другими окнами/диалогами.
                     self.screen = pygame.display.set_mode(self._desktop_size, pygame.NOFRAME)
             actual_w, actual_h = self.screen.get_size()
+            if platform_utils.is_android():
+                config.set_ui_scale(actual_w, actual_h)
             # Доска должна реально использовать весь экран в fullscreen,
             # а не оставаться маленьким островком посреди тёмного фона —
             # поэтому бюджет пикселей под доску пересчитывается от
@@ -735,7 +747,12 @@ class App:
     def draw_main_menu(self, mouse_pos):
         self._draw_plain_background()
         cx = config.SCREEN_WIDTH // 2
-        R.draw_panel(self.screen, pygame.Rect(cx - 230, 64, 460, 530), radius=18)
+        # Панель шире на больших landscape-экранах, но верхний край и все
+        # Y-координаты держим как раньше (64 / 118 / 158 / 186) — кнопки
+        # main_menu_buttons заданы АБСОЛЮТНЫМИ Y от верха панели, менять
+        # вертикальную геометрию нельзя, не сдвинув и кнопки вместе с ней.
+        panel_w = max(460, min(640, int(config.SCREEN_WIDTH * 0.30)))
+        R.draw_panel(self.screen, pygame.Rect(cx - panel_w // 2, 64, panel_w, 530), radius=18)
         title = self.font_big.render("HP BATTLE CHESS", True, config.COLOR_TEXT)
         self.screen.blit(title, title.get_rect(center=(cx, 118)))
         sub = self.font_mid.render("ТАКТИЧЕСКОЕ ПОЛЕ БОЯ", True, config.COLOR_TEXT_DIM)
