@@ -120,6 +120,15 @@ def ai_black_layout():
     return ai_core.suggest_formation("black", config.BLACK_HALF_ROWS, (config.BOARD_WIDTH, config.BOARD_HEIGHT))
 
 
+def S(value):
+    """Масштабирует "дизайнерский" пиксельный размер (ширина/высота кнопки,
+    шаг сетки и т.п.) на config.UI_SCALE. На desktop UI_SCALE == 1.0, так
+    что S(x) == x и ничего не меняется. Использовать для РАЗМЕРОВ и
+    ЛОКАЛЬНЫХ смещений — не для координат, уже выведенных из реального
+    config.SCREEN_WIDTH/HEIGHT (те уже "настоящие" пиксели экрана)."""
+    return round(value * config.UI_SCALE)
+
+
 class Button:
     def __init__(self, rect, text):
         self.rect = pygame.Rect(rect)
@@ -147,8 +156,12 @@ class Layout:
         self.x = x
 
     def take(self, height, gap=10):
+        # height/gap масштабируются на UI_SCALE — иначе на Android, где
+        # шрифты и кнопки крупнее (см. renderer.make_font, config.UI_SCALE),
+        # интервал между строками остался бы прежним "desktop" размером и
+        # текст/кнопки начали бы наезжать друг на друга.
         y = self.y
-        self.y += height + gap
+        self.y += S(height) + S(gap)
         return y
 
 
@@ -333,17 +346,30 @@ class App:
                     # tkinter-диалога поверх игры — см. _choose_file,
                     # которая на Android вообще не запускает subprocess).
                     # (0, 0) — стандартный для python-for-android паттерн
-                    # "взять текущее разрешение экрана устройства";
-                    # альбомная ориентация задаётся декларативно на уровне
-                    # Android-манифеста (buildozer.spec: orientation =
-                    # landscape), а не через размер surface здесь.
+                    # "взять текущее разрешение экрана устройства", но он
+                    # работает ТОЛЬКО с голым FULLSCREEN. Флаг SCALED
+                    # требует явный ненулевой размер — с (0, 0) падает
+                    # с "Cannot set 0 sized SCALED display mode". Поэтому
+                    # сначала узнаём реальное разрешение через
+                    # pygame.display.Info() и передаём его явно.
                     # SCALED переключает SDL2 на её аппаратно ускоренный
                     # render-backend (вместо софтверного surface-блиттинга),
                     # который на Android даёт кратно другую производительность
                     # при той же логике отрисовки через pygame.draw — без
                     # SCALED флага SDL2 на многих Android-устройствах рисует
                     # программно даже на мощном железе.
-                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.SCALED)
+                    try:
+                        _info = pygame.display.Info()
+                        _real_w, _real_h = int(_info.current_w), int(_info.current_h)
+                    except Exception:
+                        _real_w, _real_h = 0, 0
+                    if _real_w <= 0 or _real_h <= 0:
+                        # Не удалось узнать реальное разрешение — SCALED
+                        # без него не заведётся, откатываемся на обычный
+                        # FULLSCREEN с (0, 0), это надёжнее, чем упасть.
+                        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                    else:
+                        self.screen = pygame.display.set_mode((_real_w, _real_h), pygame.FULLSCREEN | pygame.SCALED)
                 else:
                     # ВАЖНО: используем "оконный" (borderless) fullscreen —
                     # обычное окно без рамки, растянутое на весь рабочий стол —
@@ -418,37 +444,43 @@ class App:
         self._center_board_group()
         panel_x = config.BOARD_MARGIN_X + config.BOARD_WIDTH * config.CELL_SIZE + 20
         self.panel_x = panel_x
-        menu_x = panel_x - 240  # общий левый край для полноэкранных меню-оверлеев
+        menu_x = panel_x - S(240)  # общий левый край для полноэкранных меню-оверлеев
 
         # --- Главное меню --------------------------------------------------
-        main_x = config.SCREEN_WIDTH // 2 - 180
+        # main_x/panel_top синхронизированы с draw_main_menu() — там панель
+        # и заголовок используют те же S(...)-смещения от того же верха.
+        main_x = config.SCREEN_WIDTH // 2 - S(180)
+        panel_top = S(64)
         self.main_menu_buttons = {
-            "play": Button((main_x, 230, 360, 52), "ИГРАТЬ"),
-            "network": Button((main_x, 298, 360, 52), "МУЛЬТИПЛЕЕР ПО СЕТИ"),
-            "tutorial": Button((main_x, 366, 360, 52), "ОБУЧЕНИЕ"),
-            "settings": Button((main_x, 434, 360, 52), "НАСТРОЙКИ"),
-            "exit": Button((main_x, 502, 360, 52), "ВЫХОД"),
+            "play": Button((main_x, panel_top + S(166), S(360), S(52)), "ИГРАТЬ"),
+            "network": Button((main_x, panel_top + S(234), S(360), S(52)), "МУЛЬТИПЛЕЕР ПО СЕТИ"),
+            "tutorial": Button((main_x, panel_top + S(302), S(360), S(52)), "ОБУЧЕНИЕ"),
+            "settings": Button((main_x, panel_top + S(370), S(360), S(52)), "НАСТРОЙКИ"),
+            "exit": Button((main_x, panel_top + S(438), S(360), S(52)), "ВЫХОД"),
         }
-        self.settings_fullscreen_button = Button((main_x, 250, 360, 46), "ПОЛНЫЙ ЭКРАН")
-        self.settings_music_button = Button((main_x, 306, 360, 46), "МУЗЫКА: ВЫБРАТЬ")
-        self.settings_background_button = Button((main_x, 362, 360, 46), "ФОН: ВЫБРАТЬ")
-        self.settings_back_button = Button((main_x, 432, 360, 46), "НАЗАД")
+        self._main_menu_panel_top = panel_top  # используется в draw_main_menu
+        # Реальные .rect у этих четырёх выставляются каждый кадр в
+        # draw_settings_screen() — здесь только создаём сами объекты.
+        self.settings_fullscreen_button = Button((main_x, panel_top + S(186), S(360), S(46)), "ПОЛНЫЙ ЭКРАН")
+        self.settings_music_button = Button((main_x, panel_top + S(242), S(360), S(46)), "МУЗЫКА: ВЫБРАТЬ")
+        self.settings_background_button = Button((main_x, panel_top + S(298), S(360), S(46)), "ФОН: ВЫБРАТЬ")
+        self.settings_back_button = Button((main_x, panel_top + S(368), S(360), S(46)), "НАЗАД")
 
         # --- Выбор игрового режима (ПЕРВЫЙ экран) ---
-        lay = Layout(150)
+        lay = Layout(S(150))
         self.game_mode_buttons = {}
         for mode in config.GAME_MODES:
             y = lay.take(48, gap=26)  # доп. место под строку описания под кнопкой
-            self.game_mode_buttons[mode] = Button((menu_x, y, 480, 48), config.GAME_MODE_NAMES[mode])
-        self.game_mode_next_button = Button((menu_x + 130, lay.take(48, gap=0), 220, 48), "Далее")
+            self.game_mode_buttons[mode] = Button((menu_x, y, S(480), S(48)), config.GAME_MODE_NAMES[mode])
+        self.game_mode_next_button = Button((menu_x + S(130), lay.take(48, gap=0), S(220), S(48)), "Далее")
 
         # --- Выбор размера доски (ВТОРОЙ экран, после режима) ---
-        lay2 = Layout(190)
+        lay2 = Layout(S(190))
         row_y = lay2.take(56, gap=20)
         self.board_size_buttons = {}
         for i, size in enumerate(config.BOARD_SIZE_OPTIONS):
-            self.board_size_buttons[size] = Button((menu_x + i * 160, row_y, 140, 56), f"{size[0]} x {size[1]}")
-        self.board_size_next_button = Button((menu_x + 130, lay2.take(48, gap=0), 220, 48), "Далее")
+            self.board_size_buttons[size] = Button((menu_x + i * S(160), row_y, S(140), S(56)), f"{size[0]} x {size[1]}")
+        self.board_size_next_button = Button((menu_x + S(130), lay2.take(48, gap=0), S(220), S(48)), "Далее")
 
         # --- Расстановка (кнопки закреплены снизу панели) ---
         # ВАЖНО: раньше эти кнопки были привязаны к config.SCREEN_HEIGHT —
@@ -460,61 +492,61 @@ class App:
         # физическому низу экрана, отрываясь от текста/доски огромным
         # пустым провалом. Теперь якорь — низ САМОЙ ДОСКИ, а не окна.
         board_bottom = config.BOARD_MARGIN_Y + config.BOARD_HEIGHT * config.CELL_SIZE
-        self.ready_button = Button((panel_x, board_bottom - 120, config.SIDE_PANEL_WIDTH - 40, 44), "Начать партию")
-        self.random_button = Button((panel_x, board_bottom - 68, config.SIDE_PANEL_WIDTH - 40, 36), "Случайная расстановка")
+        self.ready_button = Button((panel_x, board_bottom - S(120), config.SIDE_PANEL_WIDTH - 40, S(44)), "Начать партию")
+        self.random_button = Button((panel_x, board_bottom - S(68), config.SIDE_PANEL_WIDTH - 40, S(36)), "Случайная расстановка")
 
         # --- Игровой экран ---
-        self.skip_king_button = Button((panel_x, board_bottom - 92, config.SIDE_PANEL_WIDTH - 40, 40), "Пропустить действие короля")
-        self.end_turn_button = Button((panel_x, board_bottom - 40, config.SIDE_PANEL_WIDTH - 40, 40), "Завершить ход")
-        self.restart_button = Button((config.SCREEN_WIDTH // 2 - 100, config.SCREEN_HEIGHT // 2 + 40, 200, 46), "Новая игра")
-        self.network_rematch_button = Button((config.SCREEN_WIDTH // 2 - 110, config.SCREEN_HEIGHT // 2 + 35, 220, 42), "ИГРАТЬ СНОВА")
-        self.network_exit_button = Button((config.SCREEN_WIDTH // 2 - 110, config.SCREEN_HEIGHT // 2 + 88, 220, 42), "ВЫЙТИ")
-        self.surrender_button = Button((panel_x, board_bottom - 150, config.SIDE_PANEL_WIDTH - 40, 34), "СДАТЬСЯ")
+        self.skip_king_button = Button((panel_x, board_bottom - S(92), config.SIDE_PANEL_WIDTH - 40, S(40)), "Пропустить действие короля")
+        self.end_turn_button = Button((panel_x, board_bottom - S(40), config.SIDE_PANEL_WIDTH - 40, S(40)), "Завершить ход")
+        self.restart_button = Button((config.SCREEN_WIDTH // 2 - S(100), config.SCREEN_HEIGHT // 2 + S(40), S(200), S(46)), "Новая игра")
+        self.network_rematch_button = Button((config.SCREEN_WIDTH // 2 - S(110), config.SCREEN_HEIGHT // 2 + S(35), S(220), S(42)), "ИГРАТЬ СНОВА")
+        self.network_exit_button = Button((config.SCREEN_WIDTH // 2 - S(110), config.SCREEN_HEIGHT // 2 + S(88), S(220), S(42)), "ВЫЙТИ")
+        self.surrender_button = Button((panel_x, board_bottom - S(150), config.SIDE_PANEL_WIDTH - 40, S(34)), "СДАТЬСЯ")
 
         # --- Обучение: все нижние кнопки привязаны к нижней части панели
         # и не зависят от высоты текста карточки. Реальные позиции
         # выставляются каждый кадр в draw_tutorial_panel().
         tut_btn_w = config.SIDE_PANEL_WIDTH - 40
-        self.tutorial_back_button = Button((panel_x, board_bottom - 92, tut_btn_w, 40), "Назад")
-        self.tutorial_next_button = Button((panel_x, board_bottom - 40, tut_btn_w, 40), "Далее")
-        self.tutorial_skip_button = Button((panel_x, board_bottom - 212, tut_btn_w, 30), "Пропустить обучение")
+        self.tutorial_back_button = Button((panel_x, board_bottom - S(92), tut_btn_w, S(40)), "Назад")
+        self.tutorial_next_button = Button((panel_x, board_bottom - S(40), tut_btn_w, S(40)), "Далее")
+        self.tutorial_skip_button = Button((panel_x, board_bottom - S(212), tut_btn_w, S(30)), "Пропустить обучение")
 
         # Ферзь: MOVE выполняется обычным кликом по доске (действие уже
         # есть в action_map). Кнопки — только для входа/выхода из режима
         # турели (see actions.py: queen_lock / queen_unlock).
         # У ферзя только ОДИН режим атаки вообще — дальняя атака (SPLASH убран).
         self.queen_lock_buttons = {
-            "queen_ranged": Button((panel_x, 300, config.SIDE_PANEL_WIDTH - 40, 34), "Включить дальнюю атаку"),
+            "queen_ranged": Button((panel_x, 300, config.SIDE_PANEL_WIDTH - 40, S(34)), "Включить дальнюю атаку"),
         }
-        self.queen_unlock_button = Button((panel_x, 300, config.SIDE_PANEL_WIDTH - 40, 34), "Выйти из режима ДАЛЬНЕЙ АТАКИ")
+        self.queen_unlock_button = Button((panel_x, 300, config.SIDE_PANEL_WIDTH - 40, S(34)), "Выйти из режима ДАЛЬНЕЙ АТАКИ")
 
         # Спешивание коня: сначала "вооружить" действие кнопкой, затем
         # выбрать клетку на доске (см. build_action_map — dismount-цели
         # не подмешиваются в обычную карту ходов во избежание коллизий).
-        self.dismount_button = Button((panel_x, 380, config.SIDE_PANEL_WIDTH - 40, 32), "Спешить коня")
+        self.dismount_button = Button((panel_x, 380, config.SIDE_PANEL_WIDTH - 40, S(32)), "Спешить коня")
 
         # --- Выбор противника ---
         self.opponent_type_buttons = {
-            "algorithm": Button((menu_x, 160, 220, 60), "Алгоритмический ИИ"),
-            "local": Button((menu_x + 260, 160, 220, 60), "Локальный ИИ"),
-            "network": Button((menu_x, 390, 480, 56), "Мультиплеер по локальной сети"),
+            "algorithm": Button((menu_x, S(160), S(220), S(60)), "Алгоритмический ИИ"),
+            "local": Button((menu_x + S(260), S(160), S(220), S(60)), "Локальный ИИ"),
+            "network": Button((menu_x, S(390), S(480), S(56)), "Мультиплеер по локальной сети"),
         }
         self.difficulty_buttons = {
-            "easy": Button((menu_x, 296, 140, 40), "Легко"),
-            "normal": Button((menu_x + 160, 296, 140, 40), "Нормально"),
-            "hard": Button((menu_x + 320, 296, 140, 40), "Сложно"),
+            "easy": Button((menu_x, S(296), S(140), S(40)), "Легко"),
+            "normal": Button((menu_x + S(160), S(296), S(140), S(40)), "Нормально"),
+            "hard": Button((menu_x + S(320), S(296), S(140), S(40)), "Сложно"),
         }
-        self.opponent_confirm_button = Button((menu_x + 130, 470, 220, 48), "Начать игру")
+        self.opponent_confirm_button = Button((menu_x + S(130), S(470), S(220), S(48)), "Начать игру")
 
         # --- LAN screen ---
-        self.lan_host_button = Button((menu_x, 190, 480, 48), "СОЗДАТЬ КОМНАТУ")
-        self.lan_find_button = Button((menu_x, 250, 480, 48), "НАЙТИ КОМНАТЫ")
-        self.lan_ip_button = Button((menu_x, 310, 480, 48), "ПОДКЛЮЧИТЬСЯ ПО IP")
-        self.lan_back_button = Button((menu_x, 370, 480, 48), "НАЗАД")
-        self.lan_refresh_button = Button((menu_x, 150, 180, 40), "СКАНИРОВАТЬ СНОВА")
-        self.lan_ip_join_button = Button((menu_x + 250, 380, 230, 46), "ПОДКЛЮЧИТЬСЯ")
-        self.lan_ip_cancel_button = Button((menu_x, 380, 220, 46), "НАЗАД")
-        self.lan_back_menu_button = Button((menu_x, 500, 480, 42), "НАЗАД В МЕНЮ СЕТИ")
+        self.lan_host_button = Button((menu_x, S(190), S(480), S(48)), "СОЗДАТЬ КОМНАТУ")
+        self.lan_find_button = Button((menu_x, S(250), S(480), S(48)), "НАЙТИ КОМНАТЫ")
+        self.lan_ip_button = Button((menu_x, S(310), S(480), S(48)), "ПОДКЛЮЧИТЬСЯ ПО IP")
+        self.lan_back_button = Button((menu_x, S(370), S(480), S(48)), "НАЗАД")
+        self.lan_refresh_button = Button((menu_x, S(150), S(180), S(40)), "СКАНИРОВАТЬ СНОВА")
+        self.lan_ip_join_button = Button((menu_x + S(250), S(380), S(230), S(46)), "ПОДКЛЮЧИТЬСЯ")
+        self.lan_ip_cancel_button = Button((menu_x, S(380), S(220), S(46)), "НАЗАД")
+        self.lan_back_menu_button = Button((menu_x, S(500), S(480), S(42)), "НАЗАД В МЕНЮ СЕТИ")
 
     def _rebuild_default_setup_pieces(self):
         self.setup_pieces = [{"type": t, "col": c, "row": r} for c, r, t in default_white_layout()]
@@ -747,17 +779,18 @@ class App:
     def draw_main_menu(self, mouse_pos):
         self._draw_plain_background()
         cx = config.SCREEN_WIDTH // 2
-        # Панель шире на больших landscape-экранах, но верхний край и все
-        # Y-координаты держим как раньше (64 / 118 / 158 / 186) — кнопки
-        # main_menu_buttons заданы АБСОЛЮТНЫМИ Y от верха панели, менять
-        # вертикальную геометрию нельзя, не сдвинув и кнопки вместе с ней.
-        panel_w = max(460, min(640, int(config.SCREEN_WIDTH * 0.30)))
-        R.draw_panel(self.screen, pygame.Rect(cx - panel_w // 2, 64, panel_w, 530), radius=18)
+        # panel_top и все смещения синхронизированы с main_menu_buttons в
+        # _build_ui_widgets() — оба места используют один and тот же S(...)
+        # от одного и того же panel_top, поэтому кнопки всегда попадают
+        # туда же, куда нарисована панель, независимо от UI_SCALE.
+        panel_top = self._main_menu_panel_top
+        panel_w = max(S(460), min(S(640), int(config.SCREEN_WIDTH * 0.30)))
+        R.draw_panel(self.screen, pygame.Rect(cx - panel_w // 2, panel_top, panel_w, S(530)), radius=18)
         title = self.font_big.render("HP BATTLE CHESS", True, config.COLOR_TEXT)
-        self.screen.blit(title, title.get_rect(center=(cx, 118)))
+        self.screen.blit(title, title.get_rect(center=(cx, panel_top + S(54))))
         sub = self.font_mid.render("ТАКТИЧЕСКОЕ ПОЛЕ БОЯ", True, config.COLOR_TEXT_DIM)
-        self.screen.blit(sub, sub.get_rect(center=(cx, 158)))
-        pygame.draw.line(self.screen, config.COLOR_PANEL_BORDER, (cx - 150, 186), (cx + 150, 186), 1)
+        self.screen.blit(sub, sub.get_rect(center=(cx, panel_top + S(94))))
+        pygame.draw.line(self.screen, config.COLOR_PANEL_BORDER, (cx - S(150), panel_top + S(122)), (cx + S(150), panel_top + S(122)), 1)
         for key, btn in self.main_menu_buttons.items():
             btn.draw(self.screen, self.font, mouse_pos)
 
@@ -1087,17 +1120,17 @@ class App:
     def draw_settings_screen(self, mouse_pos):
         self._draw_plain_background()
         cx = config.SCREEN_WIDTH // 2
-        panel_w = min(540, config.SCREEN_WIDTH - 36)
-        panel_h = min(540, config.SCREEN_HEIGHT - 48)
+        panel_w = min(S(540), config.SCREEN_WIDTH - 36)
+        panel_h = min(S(540), config.SCREEN_HEIGHT - 48)
         panel_x = cx - panel_w // 2
         panel_y = 24
         R.draw_panel(self.screen, pygame.Rect(panel_x, panel_y, panel_w, panel_h), radius=18)
 
         title = self.font_big.render("НАСТРОЙКИ", True, config.COLOR_TEXT)
-        self.screen.blit(title, title.get_rect(center=(cx, panel_y + 50)))
+        self.screen.blit(title, title.get_rect(center=(cx, panel_y + S(50))))
 
-        bx = cx - min(180, (panel_w - 40) // 2)
-        bw = min(360, panel_w - 40)
+        bx = cx - min(S(180), (panel_w - S(40)) // 2)
+        bw = min(S(360), panel_w - S(40))
         self.settings_fullscreen_button.text = f"ПОЛНЫЙ ЭКРАН  {'ВКЛ' if self.fullscreen else 'ВЫКЛ'}"
         # На Android нет desktop file picker (см. _choose_file) — кнопки
         # остаются на месте (не переделываем layout), но подписи честно
@@ -1108,9 +1141,9 @@ class App:
         else:
             self.settings_music_button.text = "МУЗЫКА: ВЫБРАТЬ"
             self.settings_background_button.text = "ФОН: ВЫБРАТЬ"
-        self.settings_fullscreen_button.rect = pygame.Rect(bx, panel_y + 92, bw, 46)
-        self.settings_music_button.rect = pygame.Rect(bx, panel_y + 148, bw, 46)
-        self.settings_background_button.rect = pygame.Rect(bx, panel_y + 204, bw, 46)
+        self.settings_fullscreen_button.rect = pygame.Rect(bx, panel_y + S(92), bw, S(46))
+        self.settings_music_button.rect = pygame.Rect(bx, panel_y + S(148), bw, S(46))
+        self.settings_background_button.rect = pygame.Rect(bx, panel_y + S(204), bw, S(46))
 
         self.settings_fullscreen_button.draw(self.screen, self.font_small, mouse_pos, active=self.fullscreen)
         self.settings_music_button.draw(self.screen, self.font_small, mouse_pos, active=bool(self.music_path))
@@ -1118,19 +1151,19 @@ class App:
 
         music_label = ("Музыка: " + self._short_name(os.path.basename(self.music_path), 30)) if self.music_path else "Музыка: файл не выбран"
         bg_label = ("Фон: " + self._short_name(os.path.basename(self.background_path), 30)) if self.background_path else "Фон: файл не выбран"
-        R.draw_text(self.screen, music_label, (bx, panel_y + 262), self.font_small, config.COLOR_TEXT_DIM)
-        R.draw_text(self.screen, bg_label, (bx, panel_y + 286), self.font_small, config.COLOR_TEXT_DIM)
+        R.draw_text(self.screen, music_label, (bx, panel_y + S(262)), self.font_small, config.COLOR_TEXT_DIM)
+        R.draw_text(self.screen, bg_label, (bx, panel_y + S(286)), self.font_small, config.COLOR_TEXT_DIM)
         R.draw_text(self.screen, "Музыка повторяется автоматически. Формат зависит от SDL_mixer.",
-                    (bx, panel_y + 322), self.font_small, config.COLOR_TEXT_DIM)
+                    (bx, panel_y + S(322)), self.font_small, config.COLOR_TEXT_DIM)
         R.draw_text(self.screen, "Фон вписывается в окно с сохранением пропорций.",
-                    (bx, panel_y + 344), self.font_small, config.COLOR_TEXT_DIM)
+                    (bx, panel_y + S(344)), self.font_small, config.COLOR_TEXT_DIM)
         R.draw_text(self.screen, "Повторное нажатие на кнопку заменяет выбранный файл.",
-                    (bx, panel_y + 366), self.font_small, config.COLOR_TEXT_DIM)
-        back_y = panel_y + panel_h - 60
+                    (bx, panel_y + S(366)), self.font_small, config.COLOR_TEXT_DIM)
+        back_y = panel_y + panel_h - S(60)
         if self.network_status:
             is_error = "Не удалось" in self.network_status or "недоступен" in self.network_status
             status_color = config.COLOR_DAMAGE_NUMBER if is_error else config.COLOR_TEXT_DIM
-            status_y = min(panel_y + 396, back_y - 40)
+            status_y = min(panel_y + S(396), back_y - S(40))
             text = self.network_status
             # Простой перенос на вторую строку для длинных сообщений
             # (например подсказки про недостающий python3-tk) — font.render
@@ -1142,9 +1175,9 @@ class App:
             else:
                 lines = [text]
             for i, line in enumerate(lines):
-                R.draw_text(self.screen, line, (bx, status_y + i * 20), self.font_small, status_color)
+                R.draw_text(self.screen, line, (bx, status_y + i * S(20)), self.font_small, status_color)
 
-        self.settings_back_button.rect = pygame.Rect(bx, back_y, bw, 46)
+        self.settings_back_button.rect = pygame.Rect(bx, back_y, bw, S(46))
         self.settings_back_button.draw(self.screen, self.font_small, mouse_pos)
 
     # ------------------------------------------------------------------
@@ -1161,13 +1194,13 @@ class App:
 
     def draw_select_game_mode_screen(self, mouse_pos):
         R.draw_board(self.screen)
-        menu_x = self.panel_x - 240
+        menu_x = self.panel_x - S(240)
         overlay = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((10, 10, 14, 210))
         self.screen.blit(overlay, (0, 0))
-        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, 62, 524, 500), radius=16)
-        R.draw_text(self.screen, "ВЫБОР РЕЖИМА ИГРЫ", (menu_x, 90), self.font_big, config.COLOR_ACCENT)
-        R.draw_text(self.screen, "Выберите цель партии:", (menu_x, 124), self.font_small, config.COLOR_TEXT_DIM)
+        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), S(500)), radius=16)
+        R.draw_text(self.screen, "ВЫБОР РЕЖИМА ИГРЫ", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
+        R.draw_text(self.screen, "Выберите цель партии:", (menu_x, S(124)), self.font_small, config.COLOR_TEXT_DIM)
         for mode, btn in self.game_mode_buttons.items():
             btn.draw(self.screen, self.font, mouse_pos, active=(mode == self.selected_game_mode))
             R.draw_text(self.screen, config.GAME_MODE_DESCRIPTIONS[mode],
@@ -1202,14 +1235,14 @@ class App:
 
     def draw_select_board_size_screen(self, mouse_pos):
         R.draw_board(self.screen)
-        menu_x = self.panel_x - 240
+        menu_x = self.panel_x - S(240)
         overlay = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((10, 10, 14, 210))
         self.screen.blit(overlay, (0, 0))
-        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, 62, 524, 360), radius=16)
-        R.draw_text(self.screen, "РАЗМЕР КАРТЫ", (menu_x, 90), self.font_big, config.COLOR_ACCENT)
+        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), S(360)), radius=16)
+        R.draw_text(self.screen, "РАЗМЕР КАРТЫ", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
         R.draw_text(self.screen, "Режим: " + config.GAME_MODE_NAMES[self.selected_game_mode],
-                    (menu_x, 124), self.font_small, config.COLOR_TEXT_DIM)
+                    (menu_x, S(124)), self.font_small, config.COLOR_TEXT_DIM)
         R.draw_text(self.screen, "Маленькая армия — большая территория:",
                     (menu_x, 146), self.font_small, config.COLOR_TEXT_DIM)
         for size, btn in self.board_size_buttons.items():
@@ -1386,41 +1419,41 @@ class App:
         R.draw_board(self.screen)
         R.draw_all_pieces(self.screen, self.state, self.font_small)
 
-        menu_x = self.panel_x - 240
+        menu_x = self.panel_x - S(240)
         overlay = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((10, 10, 14, 210))
         self.screen.blit(overlay, (0, 0))
-        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, 62, 524, 500), radius=16)
+        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), S(500)), radius=16)
 
-        R.draw_text(self.screen, "ВЫБЕРИТЕ ПРОТИВНИКА", (menu_x, 90), self.font_big, config.COLOR_ACCENT)
+        R.draw_text(self.screen, "ВЫБЕРИТЕ ПРОТИВНИКА", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
         R.draw_text(self.screen, f"Карта: {config.BOARD_WIDTH}x{config.BOARD_HEIGHT}   "
                                   f"Режим: {config.GAME_MODE_NAMES[self.selected_game_mode]}",
-                    (menu_x, 124), self.font_small, config.COLOR_TEXT_DIM)
+                    (menu_x, S(124)), self.font_small, config.COLOR_TEXT_DIM)
 
         for key, btn in self.opponent_type_buttons.items():
             btn.draw(self.screen, self.font, mouse_pos, active=(key == self.selected_opponent_type))
         algo_x = self.opponent_type_buttons["algorithm"].rect.x
         local_x = self.opponent_type_buttons["local"].rect.x
-        R.draw_text(self.screen, "Minimax + Alpha-Beta", (algo_x, 226), self.font_small, config.COLOR_TEXT_DIM)
-        R.draw_text(self.screen, "+ итеративное углубление", (algo_x, 244), self.font_small, config.COLOR_TEXT_DIM)
-        R.draw_text(self.screen, "Локальная LLM (Ollama)", (local_x, 226), self.font_small, config.COLOR_TEXT_DIM)
-        R.draw_text(self.screen, "Полностью офлайн", (local_x, 244), self.font_small, config.COLOR_TEXT_DIM)
+        R.draw_text(self.screen, "Minimax + Alpha-Beta", (algo_x, S(226)), self.font_small, config.COLOR_TEXT_DIM)
+        R.draw_text(self.screen, "+ итеративное углубление", (algo_x, S(244)), self.font_small, config.COLOR_TEXT_DIM)
+        R.draw_text(self.screen, "Локальная LLM (Ollama)", (local_x, S(226)), self.font_small, config.COLOR_TEXT_DIM)
+        R.draw_text(self.screen, "Полностью офлайн", (local_x, S(244)), self.font_small, config.COLOR_TEXT_DIM)
 
         if self.selected_opponent_type == "algorithm":
-            R.draw_text(self.screen, "Сложность (глубина/время поиска):", (menu_x, 270), self.font_small)
+            R.draw_text(self.screen, "Сложность (глубина/время поиска):", (menu_x, S(270)), self.font_small)
             for key, btn in self.difficulty_buttons.items():
                 btn.draw(self.screen, self.font_small, mouse_pos, active=(key == self.selected_difficulty))
         else:
             avail = ai_interface.check_ollama_available(timeout=0.4)
             status = "Ollama обнаружена \u2713" if avail else "Ollama не найдена — будет использован Algorithm AI"
             color = (90, 200, 120) if avail else config.COLOR_TEXT_DIM
-            R.draw_text(self.screen, status, (menu_x, 270), self.font_small, color)
+            R.draw_text(self.screen, status, (menu_x, S(270)), self.font_small, color)
 
         mem = self.ai_memory
         if self.selected_opponent_type != "network":
             stats = (f"Память ИИ: партий {mem.get('games_played', 0)}, "
                      f"побед ИИ {mem.get('wins', 0)}, поражений {mem.get('losses', 0)}")
-            R.draw_text(self.screen, stats, (menu_x, 350), self.font_small, config.COLOR_TEXT_DIM)
+            R.draw_text(self.screen, stats, (menu_x, S(350)), self.font_small, config.COLOR_TEXT_DIM)
 
         self.opponent_confirm_button.draw(self.screen, self.font, mouse_pos)
 
@@ -1853,7 +1886,7 @@ class App:
         self.network_status = ""
 
     def handle_local_network_click(self, pos):
-        menu_x = self.panel_x - 240
+        menu_x = self.panel_x - S(240)
         if self.network_screen == "menu":
             if self.lan_host_button.handle_click(pos):
                 # First configure the room exactly like a normal game:
@@ -1891,7 +1924,7 @@ class App:
                     y += 76
             # Кнопка имеет фиксированную нижнюю позицию и больше не зависит
             # от количества комнат, поэтому не налезает на сообщение.
-            self.lan_back_menu_button.rect.y = config.SCREEN_HEIGHT - 88
+            self.lan_back_menu_button.rect.y = config.SCREEN_HEIGHT - S(88)
             if self.lan_back_menu_button.handle_click(pos):
                 self.network_screen = "menu"; self.network_status = ""; return
         elif self.network_screen == "ip":
@@ -1910,7 +1943,7 @@ class App:
                 self.network_port_active = True
                 return
         elif self.network_screen == "host_wait":
-            self.lan_back_menu_button.rect.y = config.SCREEN_HEIGHT - 88
+            self.lan_back_menu_button.rect.y = config.SCREEN_HEIGHT - S(88)
             if self.lan_back_menu_button.handle_click(pos) and self.network_role is not None:
                 self.close_network()
                 self.pending_network_host = False
@@ -1997,11 +2030,11 @@ class App:
         overlay = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((10, 10, 14, 210))
         self.screen.blit(overlay, (0, 0))
-        menu_x = self.panel_x - 240
-        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, 62, 524, min(config.SCREEN_HEIGHT - 86, 620)), radius=16)
-        R.draw_text(self.screen, "LOCAL NETWORK", (menu_x, 90), self.font_big, config.COLOR_ACCENT)
-        R.draw_text(self.screen, f"Карта: {config.BOARD_WIDTH} × {config.BOARD_HEIGHT}", (menu_x, 124), self.font_small, config.COLOR_TEXT_DIM)
-        R.draw_text(self.screen, f"Режим: {config.GAME_MODE_NAMES[self.selected_game_mode]}", (menu_x + 180, 124), self.font_small, config.COLOR_TEXT_DIM)
+        menu_x = self.panel_x - S(240)
+        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), min(config.SCREEN_HEIGHT - 86, S(620))), radius=16)
+        R.draw_text(self.screen, "LOCAL NETWORK", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
+        R.draw_text(self.screen, f"Карта: {config.BOARD_WIDTH} × {config.BOARD_HEIGHT}", (menu_x, S(124)), self.font_small, config.COLOR_TEXT_DIM)
+        R.draw_text(self.screen, f"Режим: {config.GAME_MODE_NAMES[self.selected_game_mode]}", (menu_x + S(180), S(124)), self.font_small, config.COLOR_TEXT_DIM)
 
         if self.network_screen == "menu":
             self.lan_host_button.draw(self.screen, self.font, mouse_pos)
@@ -2010,32 +2043,32 @@ class App:
             self.lan_back_button.draw(self.screen, self.font, mouse_pos)
         elif self.network_screen == "browser":
             self.lan_refresh_button.draw(self.screen, self.font_small, mouse_pos)
-            y = 190
+            y = S(190)
             if self.network_scan_busy:
                 R.draw_text(self.screen, "Сканирование локальной сети...", (menu_x, y), self.font, config.COLOR_TEXT)
             elif not self.network_games:
                 R.draw_text(self.screen, "Игры не найдены.", (menu_x, y), self.font, config.COLOR_TEXT_DIM)
                 R.draw_text(self.screen, "Нажмите «Сканировать снова» или подключитесь по IP.",
-                            (menu_x, y + 28), self.font_small, config.COLOR_TEXT_DIM)
+                            (menu_x, y + S(28)), self.font_small, config.COLOR_TEXT_DIM)
             else:
                 R.draw_text(self.screen, "ДОСТУПНЫЕ ИГРЫ", (menu_x, y), self.font_mid, config.COLOR_TEXT)
-                y += 34
+                y += S(34)
                 for game in self.network_games:
-                    rect = pygame.Rect(menu_x, y, 480, 64)
+                    rect = pygame.Rect(menu_x, y, S(480), S(64))
                     R.draw_button(self.screen, rect, f"JOIN  {game.get('name', 'Game')}  |  {game.get('board', '?')}  |  {game.get('mode', '?')}", self.font_small, hover=rect.collidepoint(mouse_pos))
-                    R.draw_text(self.screen, "ОЖИДАНИЕ...", (menu_x + 12, y + 38), self.font_small, config.COLOR_TEXT_DIM)
-                    y += 76
-            self.lan_back_menu_button.rect.y = config.SCREEN_HEIGHT - 88
+                    R.draw_text(self.screen, "ОЖИДАНИЕ...", (menu_x + S(12), y + S(38)), self.font_small, config.COLOR_TEXT_DIM)
+                    y += S(76)
+            self.lan_back_menu_button.rect.y = config.SCREEN_HEIGHT - S(88)
             self.lan_back_menu_button.draw(self.screen, self.font_small, mouse_pos)
         elif self.network_screen == "ip":
-            R.draw_text(self.screen, "IP хоста", (menu_x, 250), self.font_small, config.COLOR_TEXT_DIM)
-            ip_rect = pygame.Rect(menu_x, 285, 480, 42)
+            R.draw_text(self.screen, "IP хоста", (menu_x, S(250)), self.font_small, config.COLOR_TEXT_DIM)
+            ip_rect = pygame.Rect(menu_x, S(285), S(480), S(42))
             R.draw_button(self.screen, ip_rect, self.network_ip_text or "Введите IP хоста", self.font, active=self.network_ip_active)
-            R.draw_text(self.screen, "Порт", (menu_x, 330), self.font_small, config.COLOR_TEXT_DIM)
-            port_rect = pygame.Rect(menu_x, 350, 180, 42)
+            R.draw_text(self.screen, "Порт", (menu_x, S(330)), self.font_small, config.COLOR_TEXT_DIM)
+            port_rect = pygame.Rect(menu_x, S(350), S(180), S(42))
             R.draw_button(self.screen, port_rect, self.network_port_text or str(network.DEFAULT_TCP_PORT), self.font, active=self.network_port_active)
-            self.lan_ip_cancel_button.rect.y = 420
-            self.lan_ip_join_button.rect.y = 420
+            self.lan_ip_cancel_button.rect.y = S(420)
+            self.lan_ip_join_button.rect.y = S(420)
             self.lan_ip_cancel_button.draw(self.screen, self.font_small, mouse_pos)
             self.lan_ip_join_button.draw(self.screen, self.font_small, mouse_pos)
         elif self.network_screen == "host_wait":
@@ -2043,20 +2076,20 @@ class App:
             # It is a room lobby until the second player connects.
             self.screen.fill(config.COLOR_BG)
             title = "КОМНАТА СОЗДАНА — ЖДЁМ ИГРОКА" if self.network_role == "host" else "ПОДКЛЮЧЕНИЕ"
-            R.draw_text(self.screen, title, (menu_x, 190), self.font_mid, config.COLOR_TEXT)
-            R.draw_text(self.screen, self.network_status, (menu_x, 228), self.font_small, config.COLOR_TEXT_DIM)
+            R.draw_text(self.screen, title, (menu_x, S(190)), self.font_mid, config.COLOR_TEXT)
+            R.draw_text(self.screen, self.network_status, (menu_x, S(228)), self.font_small, config.COLOR_TEXT_DIM)
             if self.network_role == "host":
-                R.draw_text(self.screen, "Передайте этот IP второму ПК:", (menu_x, 265), self.font_small, config.COLOR_TEXT_DIM)
-                R.draw_text(self.screen, f"IP: {network.get_local_ipv4()}", (menu_x, 290), self.font_mid, config.COLOR_TEXT)
-                R.draw_text(self.screen, f"Порт: {self.network_host.tcp_port if self.network_host else network.DEFAULT_TCP_PORT}", (menu_x, 318), self.font_small, config.COLOR_TEXT_DIM)
-                R.draw_text(self.screen, "На втором ПК: Мультиплеер → Подключиться по IP.", (menu_x, 350), self.font_small, config.COLOR_TEXT_DIM)
-                R.draw_text(self.screen, "Хост — белые, подключившийся — чёрные.", (menu_x, 372), self.font_small, config.COLOR_TEXT_DIM)
+                R.draw_text(self.screen, "Передайте этот IP второму ПК:", (menu_x, S(265)), self.font_small, config.COLOR_TEXT_DIM)
+                R.draw_text(self.screen, f"IP: {network.get_local_ipv4()}", (menu_x, S(290)), self.font_mid, config.COLOR_TEXT)
+                R.draw_text(self.screen, f"Порт: {self.network_host.tcp_port if self.network_host else network.DEFAULT_TCP_PORT}", (menu_x, S(318)), self.font_small, config.COLOR_TEXT_DIM)
+                R.draw_text(self.screen, "На втором ПК: Мультиплеер → Подключиться по IP.", (menu_x, S(350)), self.font_small, config.COLOR_TEXT_DIM)
+                R.draw_text(self.screen, "Хост — белые, подключившийся — чёрные.", (menu_x, S(372)), self.font_small, config.COLOR_TEXT_DIM)
             else:
-                R.draw_text(self.screen, "Получаем конфигурацию комнаты…", (menu_x, 270), self.font_small, config.COLOR_TEXT_DIM)
-            self.lan_back_menu_button.rect.y = config.SCREEN_HEIGHT - 88
+                R.draw_text(self.screen, "Получаем конфигурацию комнаты…", (menu_x, S(270)), self.font_small, config.COLOR_TEXT_DIM)
+            self.lan_back_menu_button.rect.y = config.SCREEN_HEIGHT - S(88)
             self.lan_back_menu_button.draw(self.screen, self.font_small, mouse_pos)
         if self.network_status:
-            R.draw_text(self.screen, self.network_status, (menu_x, config.SCREEN_HEIGHT - 28), self.font_small, config.COLOR_TEXT_DIM)
+            R.draw_text(self.screen, self.network_status, (menu_x, config.SCREEN_HEIGHT - S(28)), self.font_small, config.COLOR_TEXT_DIM)
 
     # ------------------------------------------------------------------
     # Игровой процесс — выбор фигуры и построение карты доступных действий
