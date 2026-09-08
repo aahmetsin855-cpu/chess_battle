@@ -154,6 +154,12 @@ def set_available_area(width_px, height_px):
 SCREEN_WIDTH = BOARD_MARGIN_X * 2 + BOARD_WIDTH * CELL_SIZE + SIDE_PANEL_WIDTH
 SCREEN_HEIGHT = BOARD_MARGIN_Y + BOARD_HEIGHT * CELL_SIZE + 50
 FPS = 30
+
+# Временный оверлей FPS/frame-time в углу экрана (см. main.py run()) —
+# нужен, чтобы увидеть на скриншоте с телефона, реально ли тормозит сам
+# игровой цикл, или проблема где-то ещё. Поставить False, когда причина
+# тормозов на Android найдена и подтверждена.
+DEBUG_SHOW_FPS = True
 # Верхний предел на dt ОДНОГО кадра. Если основной поток ненадолго
 # стопорится (разбор JSON у большого снапшота состояния, разом
 # обработанная пачка сообщений, скопившихся за время лагов сети — то
