@@ -349,27 +349,16 @@ class App:
                     # "взять текущее разрешение экрана устройства", но он
                     # работает ТОЛЬКО с голым FULLSCREEN. Флаг SCALED
                     # требует явный ненулевой размер — с (0, 0) падает
-                    # с "Cannot set 0 sized SCALED display mode". Поэтому
-                    # сначала узнаём реальное разрешение через
-                    # pygame.display.Info() и передаём его явно.
-                    # SCALED переключает SDL2 на её аппаратно ускоренный
-                    # render-backend (вместо софтверного surface-блиттинга),
-                    # который на Android даёт кратно другую производительность
-                    # при той же логике отрисовки через pygame.draw — без
-                    # SCALED флага SDL2 на многих Android-устройствах рисует
-                    # программно даже на мощном железе.
-                    try:
-                        _info = pygame.display.Info()
-                        _real_w, _real_h = int(_info.current_w), int(_info.current_h)
-                    except Exception:
-                        _real_w, _real_h = 0, 0
-                    if _real_w <= 0 or _real_h <= 0:
-                        # Не удалось узнать реальное разрешение — SCALED
-                        # без него не заведётся, откатываемся на обычный
-                        # FULLSCREEN с (0, 0), это надёжнее, чем упасть.
-                        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-                    else:
-                        self.screen = pygame.display.set_mode((_real_w, _real_h), pygame.FULLSCREEN | pygame.SCALED)
+                    # (0, 0) — стандартный для python-for-android паттерн
+                    # "взять текущее разрешение экрана устройства".
+                    #
+                    # Ранее здесь стоял флаг SCALED (аппаратно ускоренный
+                    # SDL render-backend) в расчёте на бОльшую скорость —
+                    # но на практике улучшения это не дало, а могло быть
+                    # как-то связано с новыми визуальными артефактами.
+                    # Возвращаем обычный FULLSCREEN; ищем причину тормозов
+                    # отдельно (см. счётчик FPS в углу экрана).
+                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
                 else:
                     # ВАЖНО: используем "оконный" (borderless) fullscreen —
                     # обычное окно без рамки, растянутое на весь рабочий стол —
@@ -1244,7 +1233,7 @@ class App:
         R.draw_text(self.screen, "Режим: " + config.GAME_MODE_NAMES[self.selected_game_mode],
                     (menu_x, S(124)), self.font_small, config.COLOR_TEXT_DIM)
         R.draw_text(self.screen, "Маленькая армия — большая территория:",
-                    (menu_x, 146), self.font_small, config.COLOR_TEXT_DIM)
+                    (menu_x, S(146)), self.font_small, config.COLOR_TEXT_DIM)
         for size, btn in self.board_size_buttons.items():
             btn.draw(self.screen, self.font, mouse_pos, active=(size == self.selected_board_size))
         self.board_size_next_button.draw(self.screen, self.font, mouse_pos)
@@ -1914,14 +1903,14 @@ class App:
         elif self.network_screen == "browser":
             if self.lan_refresh_button.handle_click(pos):
                 self.scan_network_games(); return
-            y = 210
+            y = S(190)
             if self.network_games:
-                y += 34
+                y += S(34)
                 for game in self.network_games:
-                    btn = Button((menu_x, y, 480, 64), f"JOIN  {game.get('name', 'Game')}")
+                    btn = Button((menu_x, y, S(480), S(64)), f"JOIN  {game.get('name', 'Game')}")
                     if btn.handle_click(pos):
                         self.join_network_game(game); return
-                    y += 76
+                    y += S(76)
             # Кнопка имеет фиксированную нижнюю позицию и больше не зависит
             # от количества комнат, поэтому не налезает на сообщение.
             self.lan_back_menu_button.rect.y = config.SCREEN_HEIGHT - S(88)
@@ -1932,8 +1921,11 @@ class App:
                 self.join_network_by_ip(); return
             if self.lan_ip_cancel_button.handle_click(pos):
                 self.network_screen = "menu"; return
-            ip_rect = pygame.Rect(menu_x, 285, 480, 42)
-            port_rect = pygame.Rect(menu_x, 340, 180, 42)
+            # ВАЖНО: эти два rect должны совпадать с тем, что реально
+            # рисуется в draw_local_network_screen() — иначе зона тапа
+            # уезжает от видимого поля ввода IP/порта.
+            ip_rect = pygame.Rect(menu_x, S(285), S(480), S(42))
+            port_rect = pygame.Rect(menu_x, S(350), S(180), S(42))
             if ip_rect.collidepoint(pos):
                 self.network_ip_active = True
                 self.network_port_active = False
@@ -2974,6 +2966,19 @@ class App:
                 self.draw_game_over(mouse_pos)
             else:
                 self.draw_game_screen(mouse_pos)
+
+            if config.DEBUG_SHOW_FPS:
+                # Временный диагностический счётчик — помогает понять,
+                # тормозит ли реально ИГРОВОЙ ЦИКЛ (тогда FPS низкий и это
+                # видно прямо на скриншоте) или дело в чём-то другом
+                # (задержка ответа сети, обработка события и т.п.), пока
+                # сам рендер идёт с нормальной частотой. Выключается одной
+                # строкой в config.py, когда причина тормозов найдена.
+                fps_text = f"FPS: {self.clock.get_fps():4.1f}  |  frame: {dt * 1000:5.1f} ms"
+                fps_surf = R.make_font(16).render(fps_text, True, (255, 220, 80))
+                bg_rect = fps_surf.get_rect(topleft=(6, 6)).inflate(10, 6)
+                pygame.draw.rect(self.screen, (0, 0, 0), bg_rect)
+                self.screen.blit(fps_surf, (bg_rect.x + 5, bg_rect.y + 3))
 
             pygame.display.flip()
 
