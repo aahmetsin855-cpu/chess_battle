@@ -2845,6 +2845,7 @@ class App:
         while self.running:
             dt = self.clock.tick(config.FPS) / 1000.0
             dt = min(dt, config.MAX_FRAME_DT)
+            _t_frame_start = time.perf_counter()
             self._update_background_surface()
             mouse_pos = pygame.mouse.get_pos()
             self._poll_file_dialog()
@@ -2941,6 +2942,8 @@ class App:
                     and self.network_screen == "host_wait"
                     and self.state.phase in ("king_stage", "lobby_stage", "game_over")):
                 self.network_screen = "game"
+            _t_update_end = time.perf_counter()
+
             if self.tutorial_active:
                 self.draw_tutorial_screen(mouse_pos)
             elif self.network_role is not None and self.network_screen == "setup_black":
@@ -2967,14 +2970,18 @@ class App:
             else:
                 self.draw_game_screen(mouse_pos)
 
+            _t_draw_end = time.perf_counter()
+
             if config.DEBUG_SHOW_FPS:
-                # Временный диагностический счётчик — помогает понять,
-                # тормозит ли реально ИГРОВОЙ ЦИКЛ (тогда FPS низкий и это
-                # видно прямо на скриншоте) или дело в чём-то другом
-                # (задержка ответа сети, обработка события и т.п.), пока
-                # сам рендер идёт с нормальной частотой. Выключается одной
-                # строкой в config.py, когда причина тормозов найдена.
-                fps_text = f"FPS: {self.clock.get_fps():4.1f}  |  frame: {dt * 1000:5.1f} ms"
+                # Временный диагностический оверлей: три числа вместо
+                # одного FPS — события+апдейт / отрисовка / flip. Это
+                # покажет, В КАКОЙ ИМЕННО стадии кадра теряется время,
+                # вместо того чтобы гадать. Выключается одной строкой в
+                # config.py, когда причина тормозов найдена.
+                events_ms = (_t_update_end - _t_frame_start) * 1000.0
+                draw_ms = (_t_draw_end - _t_update_end) * 1000.0
+                fps_text = (f"FPS:{self.clock.get_fps():4.1f}  ev+upd:{events_ms:5.1f}ms  "
+                            f"draw:{draw_ms:5.1f}ms")
                 fps_surf = R.make_font(16).render(fps_text, True, (255, 220, 80))
                 bg_rect = fps_surf.get_rect(topleft=(6, 6)).inflate(10, 6)
                 pygame.draw.rect(self.screen, (0, 0, 0), bg_rect)
