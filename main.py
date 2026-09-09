@@ -490,7 +490,7 @@ class App:
         self.restart_button = Button((config.SCREEN_WIDTH // 2 - S(100), config.SCREEN_HEIGHT // 2 + S(40), S(200), S(46)), "Новая игра")
         self.network_rematch_button = Button((config.SCREEN_WIDTH // 2 - S(110), config.SCREEN_HEIGHT // 2 + S(35), S(220), S(42)), "ИГРАТЬ СНОВА")
         self.network_exit_button = Button((config.SCREEN_WIDTH // 2 - S(110), config.SCREEN_HEIGHT // 2 + S(88), S(220), S(42)), "ВЫЙТИ")
-        self.surrender_button = Button((panel_x, board_bottom - S(150), config.SIDE_PANEL_WIDTH - 40, S(34)), "СДАТЬСЯ")
+        self.surrender_button = Button((panel_x, board_bottom - S(166), config.SIDE_PANEL_WIDTH - 40, S(34)), "СДАТЬСЯ")
 
         # --- Обучение: все нижние кнопки привязаны к нижней части панели
         # и не зависят от высоты текста карточки. Реальные позиции
