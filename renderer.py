@@ -173,17 +173,31 @@ def _piece_silhouette_mask(piece_type, r):
     return surf
 
 
+_clipped_highlight_cache = {}
+
+
 def _draw_clipped_highlight(screen, piece_type, r, cx, cy, color, alpha, hi_r_frac, offset_frac):
-    """Рисует полупрозрачный блик, обрезанный точно по силуэту фигуры."""
-    mask = _piece_silhouette_mask(piece_type, r)
-    size = mask.get_width()
-    ccx = ccy = size // 2
-    hi_r = max(2, int(r * hi_r_frac))
-    blob_x = ccx - int(r * offset_frac)
-    blob_y = ccy - int(r * offset_frac)
-    surf = pygame.Surface((size, size), pygame.SRCALPHA)
-    pygame.draw.circle(surf, (*color, alpha), (blob_x, blob_y), hi_r)
-    surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    """Рисует полупрозрачный блик, обрезанный точно по силуэту фигуры.
+
+    Сам блик (круг + умножение на маску силуэта) кэшируется по параметрам
+    формы — раньше это пересобиралось (новый Surface + draw.circle +
+    BLEND_RGBA_MULT по всей площади) для КАЖДОЙ фигуры на доске КАЖДЫЙ
+    кадр, что при 20-30 фигурах было одной из главных причин
+    катастрофически низкого FPS на Android (см. FPS/draw-time профиль)."""
+    key = (piece_type, r, color, alpha, hi_r_frac, offset_frac)
+    surf = _clipped_highlight_cache.get(key)
+    if surf is None:
+        mask = _piece_silhouette_mask(piece_type, r)
+        size = mask.get_width()
+        ccx = ccy = size // 2
+        hi_r = max(2, int(r * hi_r_frac))
+        blob_x = ccx - int(r * offset_frac)
+        blob_y = ccy - int(r * offset_frac)
+        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(surf, (*color, alpha), (blob_x, blob_y), hi_r)
+        surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        _clipped_highlight_cache[key] = surf
+    ccx = ccy = surf.get_width() // 2
     screen.blit(surf, (cx - ccx, cy - ccy))
 
 
@@ -376,14 +390,14 @@ class PieceRenderer:
             spike_bottom = cy - body_r + 2
             spike_w = max(4, int(r * 0.20))
             spike_rect = pygame.Rect(cx - spike_w // 2, spike_top, spike_w, max(2, spike_bottom - spike_top))
-            pygame.draw.rect(screen, fill, spike_rect, border_radius=1)
-            pygame.draw.rect(screen, outline, spike_rect, ow, border_radius=1)
+            pygame.draw.rect(screen, fill, spike_rect)
+            pygame.draw.rect(screen, outline, spike_rect, ow)
             bar_w = max(9, int(r * 0.46))
             bar_h = spike_w
             bar_y = spike_top + int((spike_bottom - spike_top) * 0.30)
             bar_rect = pygame.Rect(cx - bar_w // 2, bar_y, bar_w, bar_h)
-            pygame.draw.rect(screen, fill, bar_rect, border_radius=1)
-            pygame.draw.rect(screen, outline, bar_rect, ow, border_radius=1)
+            pygame.draw.rect(screen, fill, bar_rect)
+            pygame.draw.rect(screen, outline, bar_rect, ow)
         elif t == "bishop":
             pts = [(cx, cy - r), (cx - r, cy + r), (cx + r, cy + r)]
             pygame.draw.polygon(screen, fill, pts)
@@ -394,8 +408,8 @@ class PieceRenderer:
             # простой квадратный силуэт без отдельной "короны".
             rr = max(9, r)
             body = pygame.Rect(cx - rr, cy - rr, 2 * rr, 2 * rr)
-            pygame.draw.rect(screen, fill, body, border_radius=max(2, rr // 6))
-            pygame.draw.rect(screen, outline, body, ow, border_radius=max(2, rr // 6))
+            pygame.draw.rect(screen, fill, body)
+            pygame.draw.rect(screen, outline, body, ow)
             # Небольшой внутренний штрих оставляет фигуру визуально живой,
             # но не превращает её снова в сложный силуэт.
             inset = max(4, rr // 4)
@@ -416,8 +430,8 @@ class PieceRenderer:
             # мельче ладьи, хотя должен быть как минимум не меньше.
             body_half = max(8, int(r * 0.80))
             body = pygame.Rect(cx - body_half, cy - body_half, 2 * body_half, 2 * body_half)
-            pygame.draw.rect(screen, fill, body, border_radius=max(2, body_half // 5))
-            pygame.draw.rect(screen, outline, body, ow, border_radius=max(2, body_half // 5))
+            pygame.draw.rect(screen, fill, body)
+            pygame.draw.rect(screen, outline, body, ow)
             top_y = cy - body_half
             tooth_w = max(7, int(r * 0.36))
             tooth_h = max(6, int(r * 0.20))
@@ -467,10 +481,10 @@ class PieceRenderer:
         ratio = max(0.0, min(1.0, hp_value / piece.max_hp))
         if 0 < ratio <= config.LOW_HP_RATIO:
             hp_color = _lerp_color(hp_color, config.COLOR_HP_LOW_PULSE, _pulse(config.LOW_HP_PULSE_PERIOD))
-        pygame.draw.rect(screen, config.COLOR_HP_BAR_BG, (bar_x, bar_y, bar_w, bar_h), border_radius=3)
+        pygame.draw.rect(screen, config.COLOR_HP_BAR_BG, (bar_x, bar_y, bar_w, bar_h))
         fill_w = max(0, int(bar_w * ratio))
         if fill_w > 0:
-            pygame.draw.rect(screen, hp_color, (bar_x, bar_y, fill_w, bar_h), border_radius=3)
+            pygame.draw.rect(screen, hp_color, (bar_x, bar_y, fill_w, bar_h))
             # Тонкий блик по верхнему краю заполненной части — читается
             # как глянцевый "энергетический" индикатор, не просто плашка.
             hi_h = max(1, bar_h // 3)
@@ -479,7 +493,7 @@ class PieceRenderer:
                 hi_bar = pygame.Surface((hi_w, hi_h), pygame.SRCALPHA)
                 hi_bar.fill((*config.COLOR_HP_BAR_TOP, 60))
                 screen.blit(hi_bar, (bar_x + 1, bar_y + 1))
-        pygame.draw.rect(screen, config.COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=3)
+        pygame.draw.rect(screen, config.COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1)
 
     @staticmethod
     def draw_all(screen, state, font_small, selected_piece_id=None, animation=None, visible_ids=None):
@@ -673,23 +687,69 @@ class EffectsRenderer:
                 EffectsRenderer.draw_damage_number(screen, e)
 
 
+_rrect_cache = {}
+
+
+def _cached_rrect_fill(size, radius, color):
+    """Закешированный залитый скруглённый прямоугольник. pygame рисует
+    border_radius программно (не через GPU), и это оказалось на порядки
+    дороже плоского rect — особенно на Android. Раньше draw_panel()/
+    draw_button() пересоздавали такие поверхности с нуля КАЖДЫЙ кадр для
+    КАЖДОЙ панели/кнопки на экране; здесь же набор реально различных
+    (размер, радиус, цвет) комбинаций небольшой и конечный, так что кэш
+    заполняется за первые несколько кадров и дальше только отдаёт готовое."""
+    key = ("fill", size, radius, color)
+    surf = _rrect_cache.get(key)
+    if surf is None:
+        surf = pygame.Surface(size, pygame.SRCALPHA)
+        pygame.draw.rect(surf, color, (0, 0, size[0], size[1]), border_radius=radius)
+        _rrect_cache[key] = surf
+    return surf
+
+
+def _cached_rrect_top_fill(size, radius, color):
+    key = ("top", size, radius, color)
+    surf = _rrect_cache.get(key)
+    if surf is None:
+        surf = pygame.Surface(size, pygame.SRCALPHA)
+        pygame.draw.rect(surf, color, (0, 0, size[0], size[1]),
+                          border_top_left_radius=radius, border_top_right_radius=radius)
+        _rrect_cache[key] = surf
+    return surf
+
+
+def _cached_rrect_border(size, radius, color, width):
+    key = ("border", size, radius, color, width)
+    surf = _rrect_cache.get(key)
+    if surf is None:
+        surf = pygame.Surface(size, pygame.SRCALPHA)
+        pygame.draw.rect(surf, color, (0, 0, size[0], size[1]), width, border_radius=radius)
+        _rrect_cache[key] = surf
+    return surf
+
+
 def draw_panel(screen, rect, radius=14):
     """Нейтральная поверхность меню/HUD: один визуальный материал для всех
-    экранов — теперь с мягкой тенью позади и тонким "стеклянным" бликом
-    вдоль верхней грани, вместо плоской заливки."""
+    экранов — с мягкой тенью позади и тонким "стеклянным" бликом вдоль
+    верхней грани, вместо плоской заливки. Все скруглённые поверхности
+    закешированы (см. _cached_rrect_*) — иначе рисование border_radius
+    заново каждый кадр для каждой панели было одной из главных причин
+    тормозов на Android."""
     rect = pygame.Rect(rect)
-    shadow = pygame.Surface((rect.width + 16, rect.height + 16), pygame.SRCALPHA)
-    pygame.draw.rect(shadow, (0, 0, 0, 100), (8, 10, rect.width, rect.height), border_radius=radius)
-    screen.blit(shadow, (rect.x - 8, rect.y - 6))
+    size = (rect.width, rect.height)
 
-    pygame.draw.rect(screen, config.COLOR_PANEL_BG, rect, border_radius=radius)
+    shadow = _cached_rrect_fill(size, radius, (0, 0, 0, 100))
+    screen.blit(shadow, (rect.x, rect.y + 4))
 
-    hi = pygame.Surface((rect.width, max(1, rect.height // 2)), pygame.SRCALPHA)
-    pygame.draw.rect(hi, (*config.COLOR_PANEL_TOP_HI, 10), (0, 0, rect.width, hi.get_height()),
-                      border_top_left_radius=radius, border_top_right_radius=radius)
-    screen.blit(hi, (rect.x, rect.y))
+    fill = _cached_rrect_fill(size, radius, (*config.COLOR_PANEL_BG, 255))
+    screen.blit(fill, rect.topleft)
 
-    pygame.draw.rect(screen, config.COLOR_PANEL_BORDER, rect, 1, border_radius=radius)
+    hi_size = (rect.width, max(1, rect.height // 2))
+    hi = _cached_rrect_top_fill(hi_size, radius, (*config.COLOR_PANEL_TOP_HI, 10))
+    screen.blit(hi, rect.topleft)
+
+    border = _cached_rrect_border(size, radius, (*config.COLOR_PANEL_BORDER, 255), 1)
+    screen.blit(border, rect.topleft)
 
 
 def draw_button(screen, rect, text, font, active=False, hover=False, enabled=True):
@@ -698,17 +758,22 @@ def draw_button(screen, rect, text, font, active=False, hover=False, enabled=Tru
     if not enabled:
         color = (34, 34, 38)
     draw_rect = rect.inflate(-2, -2) if hover and enabled else rect
-    pygame.draw.rect(screen, color, draw_rect, border_radius=10)
+    size = (draw_rect.width, draw_rect.height)
+
+    fill = _cached_rrect_fill(size, 10, (*color, 255))
+    screen.blit(fill, draw_rect.topleft)
 
     if enabled:
-        hi = pygame.Surface((draw_rect.width, max(1, draw_rect.height // 2)), pygame.SRCALPHA)
-        pygame.draw.rect(hi, (*config.COLOR_BUTTON_TOP_HI, 16 if not active else 24),
-                          (0, 0, draw_rect.width, hi.get_height()),
-                          border_top_left_radius=10, border_top_right_radius=10)
-        screen.blit(hi, (draw_rect.x, draw_rect.y))
+        hi_size = (draw_rect.width, max(1, draw_rect.height // 2))
+        hi_alpha = 24 if active else 16
+        hi = _cached_rrect_top_fill(hi_size, 10, (*config.COLOR_BUTTON_TOP_HI, hi_alpha))
+        screen.blit(hi, draw_rect.topleft)
 
-    border = config.COLOR_ACCENT if active else (config.COLOR_ACCENT_DIM if hover else config.COLOR_PANEL_BORDER)
-    pygame.draw.rect(screen, border, draw_rect, 2 if active else 1, border_radius=10)
+    border_color = config.COLOR_ACCENT if active else (config.COLOR_ACCENT_DIM if hover else config.COLOR_PANEL_BORDER)
+    border_width = 2 if active else 1
+    border = _cached_rrect_border(size, 10, (*border_color, 255), border_width)
+    screen.blit(border, draw_rect.topleft)
+
     text_color = config.COLOR_TEXT if enabled else config.COLOR_TEXT_DIM
     label = font.render(text, True, text_color)
     lr = label.get_rect(center=draw_rect.center)
