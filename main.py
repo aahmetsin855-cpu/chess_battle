@@ -1182,11 +1182,12 @@ class App:
             return
 
     def draw_select_game_mode_screen(self, mouse_pos):
-        R.draw_board(self.screen)
+        # Доска здесь всё равно почти полностью скрыта затемнением ниже —
+        # рисовать её (400+ вызовов rect на клетки + подписи координат)
+        # только ради этого было чистой тратой времени на Android.
+        self.screen.fill(config.COLOR_BG)
         menu_x = self.panel_x - S(240)
-        overlay = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((10, 10, 14, 210))
-        self.screen.blit(overlay, (0, 0))
+        R.darken_overlay(self.screen)
         R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), S(500)), radius=16)
         R.draw_text(self.screen, "ВЫБОР РЕЖИМА ИГРЫ", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
         R.draw_text(self.screen, "Выберите цель партии:", (menu_x, S(124)), self.font_small, config.COLOR_TEXT_DIM)
@@ -1223,11 +1224,12 @@ class App:
             return
 
     def draw_select_board_size_screen(self, mouse_pos):
-        R.draw_board(self.screen)
+        # Доска здесь всё равно почти полностью скрыта затемнением ниже —
+        # рисовать её (400+ вызовов rect на клетки + подписи координат)
+        # только ради этого было чистой тратой времени на Android.
+        self.screen.fill(config.COLOR_BG)
         menu_x = self.panel_x - S(240)
-        overlay = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((10, 10, 14, 210))
-        self.screen.blit(overlay, (0, 0))
+        R.darken_overlay(self.screen)
         R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), S(360)), radius=16)
         R.draw_text(self.screen, "РАЗМЕР КАРТЫ", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
         R.draw_text(self.screen, "Режим: " + config.GAME_MODE_NAMES[self.selected_game_mode],
@@ -1409,9 +1411,7 @@ class App:
         R.draw_all_pieces(self.screen, self.state, self.font_small)
 
         menu_x = self.panel_x - S(240)
-        overlay = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((10, 10, 14, 210))
-        self.screen.blit(overlay, (0, 0))
+        R.darken_overlay(self.screen)
         R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), S(500)), radius=16)
 
         R.draw_text(self.screen, "ВЫБЕРИТЕ ПРОТИВНИКА", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
@@ -2018,10 +2018,10 @@ class App:
             self._text_input_active = False
 
     def draw_local_network_screen(self, mouse_pos):
-        R.draw_board(self.screen)
-        overlay = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((10, 10, 14, 210))
-        self.screen.blit(overlay, (0, 0))
+        # См. draw_select_game_mode_screen — доска тут тоже не нужна,
+        # раз сразу перекрывается затемнением почти до непрозрачности.
+        self.screen.fill(config.COLOR_BG)
+        R.darken_overlay(self.screen)
         menu_x = self.panel_x - S(240)
         R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), min(config.SCREEN_HEIGHT - 86, S(620))), radius=16)
         R.draw_text(self.screen, "LOCAL NETWORK", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
@@ -2748,9 +2748,7 @@ class App:
 
     def draw_game_over(self, mouse_pos):
         self.draw_game_screen(mouse_pos)
-        overlay = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
-        self.screen.blit(overlay, (0, 0))
+        R.darken_overlay(self.screen, alpha=180, color=(0, 0, 0))
         if self.state.winner == self.player_color:
             text = "ПОБЕДА: ВЫ"
         elif self.state.winner in ("white", "black"):
@@ -3006,3 +3004,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
