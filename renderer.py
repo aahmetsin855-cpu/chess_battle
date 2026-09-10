@@ -67,6 +67,7 @@ def make_font(size, bold=False):
 # здесь не трогает игровую логику/координаты — только пиксели.
 # ---------------------------------------------------------------------------
 _coord_font_cache = {}
+_coord_label_cache = {}
 _vignette_cache = {}
 
 
@@ -90,7 +91,7 @@ def _vignette_surface(w, h):
     surf = _vignette_cache.get(key)
     if surf is not None:
         return surf
-    surf = pygame.Surface((w, h), pygame.SRCALPHA)
+    surf = pygame.Surface((w, h), pygame.SRCALPHA).convert_alpha()
     steps = 14
     max_r = math.hypot(w / 2, h / 2)
     band = int(max_r / steps) + 2
@@ -145,7 +146,7 @@ def _piece_silhouette_mask(piece_type, r):
         return cached
     size = r * 2 + 4
     ccx = ccy = size // 2
-    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    surf = pygame.Surface((size, size), pygame.SRCALPHA).convert_alpha()
     white = (255, 255, 255, 255)
     if piece_type == "pawn":
         pygame.draw.circle(surf, white, (ccx, ccy), max(3, r - 6))
@@ -193,7 +194,7 @@ def _draw_clipped_highlight(screen, piece_type, r, cx, cy, color, alpha, hi_r_fr
         hi_r = max(2, int(r * hi_r_frac))
         blob_x = ccx - int(r * offset_frac)
         blob_y = ccy - int(r * offset_frac)
-        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        surf = pygame.Surface((size, size), pygame.SRCALPHA).convert_alpha()
         pygame.draw.circle(surf, (*color, alpha), (blob_x, blob_y), hi_r)
         surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
         _clipped_highlight_cache[key] = surf
@@ -268,13 +269,22 @@ class BoardRenderer:
         if font is None:
             return
         files = "ABCDEFGHIJKLMNOP"
+
+        def label_surf(text):
+            key = (id(font), text)
+            surf = _coord_label_cache.get(key)
+            if surf is None:
+                surf = font.render(text, True, config.COLOR_BOARD_COORD_LABEL)
+                _coord_label_cache[key] = surf
+            return surf
+
         for col in range(config.BOARD_WIDTH):
             x, _ = board_to_screen(col, 0)
-            label = font.render(files[col] if col < len(files) else str(col + 1), True, config.COLOR_BOARD_COORD_LABEL)
+            label = label_surf(files[col] if col < len(files) else str(col + 1))
             screen.blit(label, (x + config.CELL_SIZE // 2 - label.get_width() // 2, by + bh + 4))
         for row in range(config.BOARD_HEIGHT):
             _, y = board_to_screen(0, row)
-            label = font.render(str(config.BOARD_HEIGHT - row), True, config.COLOR_BOARD_COORD_LABEL)
+            label = label_surf(str(config.BOARD_HEIGHT - row))
             screen.blit(label, (bx - label.get_width() - 6, y + config.CELL_SIZE // 2 - label.get_height() // 2))
 
     @staticmethod
@@ -283,7 +293,7 @@ class BoardRenderer:
         for row in range(lo, hi + 1):
             for col in range(config.BOARD_WIDTH):
                 x, y = board_to_screen(col, row)
-                s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA)
+                s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
                 s.fill((*color, alpha))
                 screen.blit(s, (x, y))
 
@@ -291,7 +301,7 @@ class BoardRenderer:
     def draw_highlights(screen, cells, color, alpha=95):
         for c, r in cells:
             x, y = board_to_screen(c, r)
-            s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA)
+            s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
             s.fill((*color, alpha))
             screen.blit(s, (x, y))
 
@@ -308,7 +318,7 @@ class BoardRenderer:
         нетронутом облаке на много клеток не было некрасивых швов/пятен;
         доска под ним остаётся слабо видна (лёгкая дымка, не заслонка)."""
         x, y = board_to_screen(col, row)
-        s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA)
+        s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
         s.fill((255, 255, 255, 92))
         screen.blit(s, (x, y))
 
@@ -351,7 +361,7 @@ class PieceRenderer:
         # Мягкая тень под фигурой — простой приём, который сразу даёт
         # ощущение веса и "приподнятости" силуэта над доской.
         shadow_r = max(4, int(r * 1.05))
-        shadow = pygame.Surface((shadow_r * 2 + 6, shadow_r + 8), pygame.SRCALPHA)
+        shadow = pygame.Surface((shadow_r * 2 + 6, shadow_r + 8), pygame.SRCALPHA).convert_alpha()
         pygame.draw.ellipse(shadow, (0, 0, 0, 95), (0, int(shadow_r * 0.15), shadow_r * 2, int(shadow_r * 0.9)))
         screen.blit(shadow, (cx - shadow_r - 3, cy + int(r * 0.55)))
 
@@ -361,7 +371,7 @@ class PieceRenderer:
             glow_t = _pulse(config.SELECT_PULSE_PERIOD)
             glow_r = int(r * (1.28 + 0.10 * glow_t))
             glow_alpha = int(70 + 50 * glow_t)
-            glow_s = pygame.Surface((glow_r * 2 + 4, glow_r * 2 + 4), pygame.SRCALPHA)
+            glow_s = pygame.Surface((glow_r * 2 + 4, glow_r * 2 + 4), pygame.SRCALPHA).convert_alpha()
             pygame.draw.circle(glow_s, (*config.COLOR_SELECT_GLOW, glow_alpha), (glow_r + 2, glow_r + 2), glow_r, 3)
             screen.blit(glow_s, (cx - glow_r - 2, cy - glow_r - 2))
 
@@ -464,7 +474,7 @@ class PieceRenderer:
         # оставляем поверх, чтобы она всегда была читаемой.
         if not animating:
             if piece.actions_available() <= 0:
-                overlay = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA)
+                overlay = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
                 overlay.fill(config.COLOR_USED_OVERLAY)
                 screen.blit(overlay, (x, y))
             elif piece.max_actions() == 2 and piece.actions_used == 1:
@@ -490,7 +500,7 @@ class PieceRenderer:
             hi_h = max(1, bar_h // 3)
             hi_w = max(0, fill_w - 2)
             if hi_w > 0:
-                hi_bar = pygame.Surface((hi_w, hi_h), pygame.SRCALPHA)
+                hi_bar = pygame.Surface((hi_w, hi_h), pygame.SRCALPHA).convert_alpha()
                 hi_bar.fill((*config.COLOR_HP_BAR_TOP, 60))
                 screen.blit(hi_bar, (bar_x + 1, bar_y + 1))
         pygame.draw.rect(screen, config.COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1)
@@ -542,7 +552,7 @@ class EffectsRenderer:
             perp = (-uy, ux)
             p1 = (sx + perp[0] * 10, sy + perp[1] * 10)
             p2 = (sx - perp[0] * 10, sy - perp[1] * 10)
-            glow = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA)
+            glow = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
             off = (int(sx - config.CELL_SIZE / 2), int(sy - config.CELL_SIZE / 2))
             pygame.draw.line(glow, (*col, 90), (p1[0] - off[0], p1[1] - off[1]), (p2[0] - off[0], p2[1] - off[1]), 9)
             screen.blit(glow, off)
@@ -552,7 +562,7 @@ class EffectsRenderer:
             px = fx + (tx - fx) * progress
             py = fy + (ty - fy) * progress
             trail = (fx + (tx - fx) * max(0.0, progress - 0.15), fy + (ty - fy) * max(0.0, progress - 0.15))
-            glow_s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA)
+            glow_s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
             pygame.draw.circle(glow_s, (*col, 90), (config.CELL_SIZE // 2, config.CELL_SIZE // 2), 11)
             screen.blit(glow_s, (int(px - config.CELL_SIZE / 2), int(py - config.CELL_SIZE / 2)))
             pygame.draw.line(screen, col, trail, (px, py), 3)
@@ -561,7 +571,7 @@ class EffectsRenderer:
 
         elif ptype == "rook":
             alpha = int(90 + 140 * progress)
-            s = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
+            s = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA).convert_alpha()
             pygame.draw.line(s, (*col, max(0, alpha // 3)), (fx, fy), (tx, ty), 15)
             pygame.draw.line(s, (*col, alpha), (fx, fy), (tx, ty), 7)
             screen.blit(s, (0, 0))
@@ -572,7 +582,7 @@ class EffectsRenderer:
             # энергетический снаряд, летящий к цели.
             px = fx + (tx - fx) * progress
             py = fy + (ty - fy) * progress
-            glow_s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA)
+            glow_s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
             pygame.draw.circle(glow_s, (*col, 80), (config.CELL_SIZE // 2, config.CELL_SIZE // 2), 14)
             screen.blit(glow_s, (int(px - config.CELL_SIZE / 2), int(py - config.CELL_SIZE / 2)))
             pygame.draw.circle(screen, col, (int(px), int(py)), 8)
@@ -581,7 +591,7 @@ class EffectsRenderer:
         elif ptype == "knight":
             px = fx + (tx - fx) * min(1.0, progress * 1.4)
             py = fy + (ty - fy) * min(1.0, progress * 1.4)
-            glow_s = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA)
+            glow_s = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA).convert_alpha()
             pygame.draw.line(glow_s, (*col, 70), (fx, fy), (px, py), 11)
             screen.blit(glow_s, (0, 0))
             pygame.draw.line(screen, col, (fx, fy), (px, py), 5)
@@ -596,7 +606,7 @@ class EffectsRenderer:
         progress = effect["progress"]
         radius = int(6 + 22 * progress)
         alpha = int(220 * (1 - progress))
-        s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA)
+        s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
         # Внешнее кольцо ударной волны + короткая яркая вспышка в центре
         # в первый момент — читается как "удар", а не просто расширяющийся круг.
         pygame.draw.circle(s, (*config.COLOR_EFFECT_IMPACT, alpha),
@@ -625,7 +635,7 @@ class EffectsRenderer:
             px = cx + vx * t
             py = cy + vy * t + 0.5 * config.PARTICLE_GRAVITY * t * t
             size = max(1, int(3.2 * (1 - progress)))
-            spark = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            spark = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA).convert_alpha()
             pygame.draw.circle(spark, (*color, alpha), (size, size), size)
             screen.blit(spark, (int(px) - size, int(py) - size))
 
@@ -639,7 +649,7 @@ class EffectsRenderer:
         r = int((config.CELL_SIZE // 2 - 10) * scale)
         cx = x + config.CELL_SIZE // 2
         cy = y + config.CELL_SIZE // 2 - int(14 * progress)
-        s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA)
+        s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
         pygame.draw.circle(s, (*fill, alpha), (config.CELL_SIZE // 2, config.CELL_SIZE // 2 - int(14 * progress)), max(2, r))
         screen.blit(s, (x, y))
         for i in range(4):
@@ -701,7 +711,7 @@ def _cached_rrect_fill(size, radius, color):
     key = ("fill", size, radius, color)
     surf = _rrect_cache.get(key)
     if surf is None:
-        surf = pygame.Surface(size, pygame.SRCALPHA)
+        surf = pygame.Surface(size, pygame.SRCALPHA).convert_alpha()
         pygame.draw.rect(surf, color, (0, 0, size[0], size[1]), border_radius=radius)
         _rrect_cache[key] = surf
     return surf
@@ -711,7 +721,7 @@ def _cached_rrect_top_fill(size, radius, color):
     key = ("top", size, radius, color)
     surf = _rrect_cache.get(key)
     if surf is None:
-        surf = pygame.Surface(size, pygame.SRCALPHA)
+        surf = pygame.Surface(size, pygame.SRCALPHA).convert_alpha()
         pygame.draw.rect(surf, color, (0, 0, size[0], size[1]),
                           border_top_left_radius=radius, border_top_right_radius=radius)
         _rrect_cache[key] = surf
@@ -722,10 +732,30 @@ def _cached_rrect_border(size, radius, color, width):
     key = ("border", size, radius, color, width)
     surf = _rrect_cache.get(key)
     if surf is None:
-        surf = pygame.Surface(size, pygame.SRCALPHA)
+        surf = pygame.Surface(size, pygame.SRCALPHA).convert_alpha()
         pygame.draw.rect(surf, color, (0, 0, size[0], size[1]), width, border_radius=radius)
         _rrect_cache[key] = surf
     return surf
+
+
+_fullscreen_overlay_cache = {}
+
+
+def darken_overlay(screen, alpha=210, color=(10, 10, 14)):
+    """Затемняющий оверлей на весь экран для меню поверх игры. Раньше это
+    была НОВАЯ Surface размером с весь экран (на телефоне — миллионы
+    пикселей), пересоздаваемая и заполняемая каждый кадр — на Android это
+    оказалось одной из главных причин многосекундных тормозов на экранах
+    меню. Теперь генерируется один раз на размер экрана и переиспользуется
+    через blit, как и остальные закешированные поверхности выше."""
+    key = (config.SCREEN_WIDTH, config.SCREEN_HEIGHT, alpha, color)
+    surf = _fullscreen_overlay_cache.get(key)
+    if surf is None:
+        surf = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA).convert_alpha()
+        surf.fill((*color, alpha))
+        _fullscreen_overlay_cache.clear()  # старый размер экрана больше не нужен
+        _fullscreen_overlay_cache[key] = surf
+    screen.blit(surf, (0, 0))
 
 
 def draw_panel(screen, rect, radius=14):
