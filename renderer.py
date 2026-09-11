@@ -208,12 +208,35 @@ def _draw_clipped_highlight(screen, piece_type, r, cx, cy, color, alpha, hi_r_fr
 # фон клетки вместе с фигурой.
 # ---------------------------------------------------------------------------
 class BoardRenderer:
+    _board_cache = None
+    _board_cache_key = None
+
     @staticmethod
     def draw(screen):
+        key = (config.CELL_SIZE, config.BOARD_WIDTH, config.BOARD_HEIGHT,
+               config.BOARD_MARGIN_X, config.BOARD_MARGIN_Y,
+               config.SCREEN_WIDTH, config.SCREEN_HEIGHT,
+               id(config.BACKGROUND_SURFACE))
+        if BoardRenderer._board_cache is None or BoardRenderer._board_cache_key != key:
+            BoardRenderer._board_cache = BoardRenderer._render_static_board()
+            BoardRenderer._board_cache_key = key
+        screen.blit(BoardRenderer._board_cache, (0, 0))
+
+    @staticmethod
+    def _render_static_board():
+        """Собирает весь статичный слой доски (фон, клетки, фаски,
+        домашние линии, рамка, координаты, виньетка) ОДИН раз в отдельную
+        поверхность. Раньше всё это — сотни pygame.draw.rect и текстовых
+        рендеров — перерисовывалось заново КАЖДЫЙ кадр, хотя между
+        кадрами не меняется вообще ничего, кроме фигур/подсветок, которые
+        рисуются поверх этого кэша отдельно. Пересобирается только когда
+        реально меняется геометрия доски/фон (см. ключ кэша в draw())."""
+        cache = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT)).convert()
+
         if config.BACKGROUND_SURFACE is not None:
-            screen.blit(config.BACKGROUND_SURFACE, (0, 0))
+            cache.blit(config.BACKGROUND_SURFACE, (0, 0))
         else:
-            screen.fill(config.COLOR_BG)
+            cache.fill(config.COLOR_BG)
 
         bevel = max(2, config.CELL_SIZE // 14)
         for row in range(config.BOARD_HEIGHT):
@@ -223,45 +246,34 @@ class BoardRenderer:
                 base = config.COLOR_BOARD_LIGHT if light else config.COLOR_BOARD_DARK
                 hi = config.COLOR_BOARD_LIGHT_HI if light else config.COLOR_BOARD_DARK_HI
                 lo = config.COLOR_BOARD_LIGHT_LO if light else config.COLOR_BOARD_DARK_LO
-                pygame.draw.rect(screen, base, (x, y, config.CELL_SIZE, config.CELL_SIZE))
+                pygame.draw.rect(cache, base, (x, y, config.CELL_SIZE, config.CELL_SIZE))
                 # Тонкий бевел (фаска): светлее сверху/слева, темнее снизу/справа —
                 # даёт лёгкое ощущение материальности клетки без текстур.
-                pygame.draw.rect(screen, hi, (x, y, config.CELL_SIZE, bevel))
-                pygame.draw.rect(screen, hi, (x, y, bevel, config.CELL_SIZE))
-                pygame.draw.rect(screen, lo, (x, y + config.CELL_SIZE - bevel, config.CELL_SIZE, bevel))
-                pygame.draw.rect(screen, lo, (x + config.CELL_SIZE - bevel, y, bevel, config.CELL_SIZE))
+                pygame.draw.rect(cache, hi, (x, y, config.CELL_SIZE, bevel))
+                pygame.draw.rect(cache, hi, (x, y, bevel, config.CELL_SIZE))
+                pygame.draw.rect(cache, lo, (x, y + config.CELL_SIZE - bevel, config.CELL_SIZE, bevel))
+                pygame.draw.rect(cache, lo, (x + config.CELL_SIZE - bevel, y, bevel, config.CELL_SIZE))
 
         for col in range(config.BOARD_WIDTH):
             x, y = board_to_screen(col, config.WHITE_HOME_ROW)
-            pygame.draw.rect(screen, config.COLOR_ACCENT_DIM, (x, y, config.CELL_SIZE, config.CELL_SIZE), 2)
+            pygame.draw.rect(cache, config.COLOR_ACCENT_DIM, (x, y, config.CELL_SIZE, config.CELL_SIZE), 2)
             x, y = board_to_screen(col, config.BLACK_HOME_ROW)
-            pygame.draw.rect(screen, config.COLOR_ACCENT_DIM, (x, y, config.CELL_SIZE, config.CELL_SIZE), 2)
+            pygame.draw.rect(cache, config.COLOR_ACCENT_DIM, (x, y, config.CELL_SIZE, config.CELL_SIZE), 2)
 
         # Экранный прямоугольник доски всегда начинается в (BOARD_MARGIN_X,
         # BOARD_MARGIN_Y) и имеет размер bw x bh — ЭТО НЕ ЗАВИСИТ от того,
         # какой цвет сейчас смотрит на доску (VIEWER_COLOR). Разворот
         # перспективы в coords.py меняет только то, какая ЛОГИЧЕСКАЯ клетка
         # попадает в какое место экрана, а не сам ограничивающий прямоугольник.
-        #
-        # Раньше здесь этот угол вычислялся как
-        # board_to_screen(0, BOARD_HEIGHT - 1) — это давало верный
-        # верхний левый угол ТОЛЬКО для белых (когда col/row не
-        # переворачиваются). Для чёрных coords._screen_col() отражает
-        # колонку 0 на САМУЮ ПРАВУЮ визуальную колонку, поэтому bx на
-        # самом деле оказывался координатой правого края доски — отсюда
-        # съехавшая рамка/"угол" в правом нижнем углу и цифры рядов,
-        # налезающие на последнюю колонку у чёрных.
         bx, by = config.BOARD_MARGIN_X, config.BOARD_MARGIN_Y
         bw = config.BOARD_WIDTH * config.CELL_SIZE
         bh = config.BOARD_HEIGHT * config.CELL_SIZE
-        # Внешняя рамка должна описывать именно прямоугольное игровое поле.
-        # Раньше здесь по ошибке использовалась ширина и для высоты, поэтому
-        # на картах 10x8/12x8 снизу появлялась лишняя "чёрная" зона.
-        pygame.draw.rect(screen, (18, 18, 22), (bx - 3, by - 3, bw + 6, bh + 6), 2)
-        pygame.draw.rect(screen, (98, 99, 110), (bx, by, bw, bh), 2)
+        pygame.draw.rect(cache, (18, 18, 22), (bx - 3, by - 3, bw + 6, bh + 6), 2)
+        pygame.draw.rect(cache, (98, 99, 110), (bx, by, bw, bh), 2)
 
-        BoardRenderer._draw_coords(screen, bx, by, bw, bh)
-        screen.blit(_vignette_surface(config.SCREEN_WIDTH, config.SCREEN_HEIGHT), (0, 0))
+        BoardRenderer._draw_coords(cache, bx, by, bw, bh)
+        cache.blit(_vignette_surface(config.SCREEN_WIDTH, config.SCREEN_HEIGHT), (0, 0))
+        return cache
 
     @staticmethod
     def _draw_coords(screen, bx, by, bw, bh):
@@ -287,23 +299,39 @@ class BoardRenderer:
             label = label_surf(str(config.BOARD_HEIGHT - row))
             screen.blit(label, (bx - label.get_width() - 6, y + config.CELL_SIZE // 2 - label.get_height() // 2))
 
+    _tint_tile_cache = {}
+
+    @staticmethod
+    def _tint_tile(color, alpha):
+        """Готовый однотонный тайл CELL_SIZE x CELL_SIZE. zone_tint/
+        highlights/fog красят десятки клеток одним и тем же плоским
+        цветом — раньше на КАЖДУЮ клетку создавался новый Surface
+        (аллокация SRCALPHA на Android ощутимо дорогая), хотя результат
+        для данного (размер клетки, цвет, alpha) всегда один и тот же."""
+        key = (config.CELL_SIZE, color, alpha)
+        tile = BoardRenderer._tint_tile_cache.get(key)
+        if tile is None:
+            BoardRenderer._tint_tile_cache.clear()  # старый CELL_SIZE больше не нужен
+            tile = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
+            tile.fill((*color, alpha))
+            BoardRenderer._tint_tile_cache[key] = tile
+        return tile
+
     @staticmethod
     def draw_zone_tint(screen, rows, color, alpha=30):
         lo, hi = rows
+        tile = BoardRenderer._tint_tile(color, alpha)
         for row in range(lo, hi + 1):
             for col in range(config.BOARD_WIDTH):
                 x, y = board_to_screen(col, row)
-                s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
-                s.fill((*color, alpha))
-                screen.blit(s, (x, y))
+                screen.blit(tile, (x, y))
 
     @staticmethod
     def draw_highlights(screen, cells, color, alpha=95):
+        tile = BoardRenderer._tint_tile(color, alpha)
         for c, r in cells:
             x, y = board_to_screen(c, r)
-            s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
-            s.fill((*color, alpha))
-            screen.blit(s, (x, y))
+            screen.blit(tile, (x, y))
 
     @staticmethod
     def draw_cell_border(screen, col, row, color, width=3):
@@ -318,9 +346,7 @@ class BoardRenderer:
         нетронутом облаке на много клеток не было некрасивых швов/пятен;
         доска под ним остаётся слабо видна (лёгкая дымка, не заслонка)."""
         x, y = board_to_screen(col, row)
-        s = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
-        s.fill((255, 255, 255, 92))
-        screen.blit(s, (x, y))
+        screen.blit(BoardRenderer._tint_tile((255, 255, 255), 92), (x, y))
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +355,8 @@ class BoardRenderer:
 # ТОЛЬКО в HP-полоске и рамке выбора — никогда в заливке самой фигуры.
 # ---------------------------------------------------------------------------
 class PieceRenderer:
+    _shadow_cache = {}
+
     @staticmethod
     def _piece_colors(piece):
         if piece.color == config.PLAYER_COLOR:
@@ -359,10 +387,18 @@ class PieceRenderer:
         ow = 3 if selected else 2
 
         # Мягкая тень под фигурой — простой приём, который сразу даёт
-        # ощущение веса и "приподнятости" силуэта над доской.
+        # ощущение веса и "приподнятости" силуэта над доской. Форма тени
+        # зависит только от shadow_r, который на неанимированных фигурах
+        # всегда один и тот же для данного CELL_SIZE — кэшируем вместо
+        # пересоздания Surface для КАЖДОЙ фигуры КАЖДЫЙ кадр.
         shadow_r = max(4, int(r * 1.05))
-        shadow = pygame.Surface((shadow_r * 2 + 6, shadow_r + 8), pygame.SRCALPHA).convert_alpha()
-        pygame.draw.ellipse(shadow, (0, 0, 0, 95), (0, int(shadow_r * 0.15), shadow_r * 2, int(shadow_r * 0.9)))
+        shadow = PieceRenderer._shadow_cache.get(shadow_r)
+        if shadow is None:
+            if len(PieceRenderer._shadow_cache) > 64:
+                PieceRenderer._shadow_cache.clear()
+            shadow = pygame.Surface((shadow_r * 2 + 6, shadow_r + 8), pygame.SRCALPHA).convert_alpha()
+            pygame.draw.ellipse(shadow, (0, 0, 0, 95), (0, int(shadow_r * 0.15), shadow_r * 2, int(shadow_r * 0.9)))
+            PieceRenderer._shadow_cache[shadow_r] = shadow
         screen.blit(shadow, (cx - shadow_r - 3, cy + int(r * 0.55)))
 
         # Пульсирующее свечение выбранной фигуры — рисуется ДО силуэта,
@@ -474,11 +510,9 @@ class PieceRenderer:
         # оставляем поверх, чтобы она всегда была читаемой.
         if not animating:
             if piece.actions_available() <= 0:
-                overlay = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
-                overlay.fill(config.COLOR_USED_OVERLAY)
-                screen.blit(overlay, (x, y))
+                screen.blit(_used_piece_overlay(), (x, y))
             elif piece.max_actions() == 2 and piece.actions_used == 1:
-                label = font_small.render("1/2", True, config.COLOR_TEXT)
+                label = _cached_text_surface(font_small, "1/2", config.COLOR_TEXT)
                 screen.blit(label, (x + config.CELL_SIZE - 24, y + config.CELL_SIZE - 16))
 
         # HP-полоса внизу клетки — не пересекается с верхней частью ладьи.
@@ -526,6 +560,25 @@ class PieceRenderer:
 # EffectsRenderer — атаки/попадания/смерть, полностью отдельно от
 # PieceRenderer.
 # ---------------------------------------------------------------------------
+def _draw_glow_line_multi(screen, from_pt, to_pt, layers):
+    """Рисует один или несколько "светящихся" слоёв линии на маленькой
+    поверхности размером с bounding box самой линии (+ запас под ширину),
+    вместо Surface во весь экран ради одной диагональной черты — это было
+    одним из самых дорогих мест в анимациях атаки ладьи/коня на Android."""
+    fx, fy = from_pt
+    tx, ty = to_pt
+    pad = max(w for _, w in layers) + 4
+    x0, x1 = sorted((fx, tx))
+    y0, y1 = sorted((fy, ty))
+    bw = int(x1 - x0 + pad * 2)
+    bh = int(y1 - y0 + pad * 2)
+    surf = pygame.Surface((max(1, bw), max(1, bh)), pygame.SRCALPHA).convert_alpha()
+    ox, oy = x0 - pad, y0 - pad
+    for color, width in layers:
+        pygame.draw.line(surf, color, (fx - ox, fy - oy), (tx - ox, ty - oy), width)
+    screen.blit(surf, (ox, oy))
+
+
 class EffectsRenderer:
     @staticmethod
     def _effect_color(color):
@@ -571,10 +624,10 @@ class EffectsRenderer:
 
         elif ptype == "rook":
             alpha = int(90 + 140 * progress)
-            s = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA).convert_alpha()
-            pygame.draw.line(s, (*col, max(0, alpha // 3)), (fx, fy), (tx, ty), 15)
-            pygame.draw.line(s, (*col, alpha), (fx, fy), (tx, ty), 7)
-            screen.blit(s, (0, 0))
+            _draw_glow_line_multi(screen, (fx, fy), (tx, ty), [
+                ((*col, max(0, alpha // 3)), 15),
+                ((*col, alpha), 7),
+            ])
             pygame.draw.line(screen, (255, 255, 255), (fx, fy), (tx, ty), 2)
 
         elif ptype == "queen":
@@ -591,9 +644,7 @@ class EffectsRenderer:
         elif ptype == "knight":
             px = fx + (tx - fx) * min(1.0, progress * 1.4)
             py = fy + (ty - fy) * min(1.0, progress * 1.4)
-            glow_s = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT), pygame.SRCALPHA).convert_alpha()
-            pygame.draw.line(glow_s, (*col, 70), (fx, fy), (px, py), 11)
-            screen.blit(glow_s, (0, 0))
+            _draw_glow_line_multi(screen, (fx, fy), (px, py), [((*col, 70), 11)])
             pygame.draw.line(screen, col, (fx, fy), (px, py), 5)
             pygame.draw.circle(screen, col, (int(px), int(py)), 5)
 
@@ -805,15 +856,54 @@ def draw_button(screen, rect, text, font, active=False, hover=False, enabled=Tru
     screen.blit(border, draw_rect.topleft)
 
     text_color = config.COLOR_TEXT if enabled else config.COLOR_TEXT_DIM
-    label = font.render(text, True, text_color)
+    label = _cached_text_surface(font, text, text_color)
     lr = label.get_rect(center=draw_rect.center)
     screen.blit(label, lr)
 
 
+_text_render_cache = {}
+
+
+def _cached_text_surface(font, text, color):
+    """Кэш готовых текстовых Surface. font.render() создаёт новую
+    растровую поверхность с нуля при каждом вызове — на этой Android-сборке
+    это оказалось на удивление дорогой операцией (тот же код на ПК даёт
+    30 FPS без единого изменения — значит дело именно в сборке SDL_ttf, а
+    не в логике). Кэш ограничен по количеству уникальных (шрифт, текст,
+    цвет) комбинаций — для часто МЕНЯЮЩЕГОСЯ текста (например, таймер с
+    десятыми долями секунды) кэш не поможет, но для заголовков, подписей
+    кнопок, описаний и большей части статуса — эффект должен быть кардинальным."""
+    key = (id(font), text, color)
+    surf = _text_render_cache.get(key)
+    if surf is None:
+        surf = font.render(text, True, color)
+        if len(_text_render_cache) > 4000:
+            # Защита от неограниченного роста, если где-то всё же рендерится
+            # текст с постоянно уникальным содержимым (например, число с
+            # плавающей точкой) — не даём кэшу расти бесконечно.
+            _text_render_cache.clear()
+        _text_render_cache[key] = surf
+    return surf
+
+
 def draw_text(screen, text, pos, font, color=None):
     color = color or config.COLOR_TEXT
-    label = font.render(text, True, color)
+    label = _cached_text_surface(font, text, color)
     screen.blit(label, pos)
+
+
+_used_overlay_cache = {}
+
+
+def _used_piece_overlay():
+    key = config.CELL_SIZE
+    surf = _used_overlay_cache.get(key)
+    if surf is None:
+        _used_overlay_cache.clear()  # старый CELL_SIZE больше не нужен
+        surf = pygame.Surface((config.CELL_SIZE, config.CELL_SIZE), pygame.SRCALPHA).convert_alpha()
+        surf.fill(config.COLOR_USED_OVERLAY)
+        _used_overlay_cache[key] = surf
+    return surf
 
 
 # ---------------------------------------------------------------------------
