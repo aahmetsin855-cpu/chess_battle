@@ -775,9 +775,9 @@ class App:
         panel_top = self._main_menu_panel_top
         panel_w = max(S(460), min(S(640), int(config.SCREEN_WIDTH * 0.30)))
         R.draw_panel(self.screen, pygame.Rect(cx - panel_w // 2, panel_top, panel_w, S(530)), radius=18)
-        title = self.font_big.render("HP BATTLE CHESS", True, config.COLOR_TEXT)
+        title = R._cached_text_surface(self.font_big, "HP BATTLE CHESS", config.COLOR_TEXT)
         self.screen.blit(title, title.get_rect(center=(cx, panel_top + S(54))))
-        sub = self.font_mid.render("ТАКТИЧЕСКОЕ ПОЛЕ БОЯ", True, config.COLOR_TEXT_DIM)
+        sub = R._cached_text_surface(self.font_mid, "ТАКТИЧЕСКОЕ ПОЛЕ БОЯ", config.COLOR_TEXT_DIM)
         self.screen.blit(sub, sub.get_rect(center=(cx, panel_top + S(94))))
         pygame.draw.line(self.screen, config.COLOR_PANEL_BORDER, (cx - S(150), panel_top + S(122)), (cx + S(150), panel_top + S(122)), 1)
         for key, btn in self.main_menu_buttons.items():
@@ -1077,17 +1077,17 @@ class App:
         btn_w = config.SIDE_PANEL_WIDTH - 40
 
         # Отдельная нейтральная кнопка примерно по центру нижней части панели.
-        skip_y = board_bottom - 212
-        self.tutorial_skip_button.rect.update(panel_x, skip_y, btn_w, 30)
+        skip_y = board_bottom - S(212)
+        self.tutorial_skip_button.rect.update(panel_x, skip_y, btn_w, S(30))
         self.tutorial_skip_button.draw(self.screen, self.font_small, mouse_pos)
 
         # СДАТЬСЯ — выше навигационных кнопок, как часть единого нижнего блока.
-        self.surrender_button.rect.update(panel_x, board_bottom - 150, btn_w, 34)
+        self.surrender_button.rect.update(panel_x, board_bottom - S(150), btn_w, S(34))
         if step["goal"] == "surrender":
             self.surrender_button.draw(self.screen, self.font, mouse_pos)
 
-        self.tutorial_back_button.rect.update(panel_x, board_bottom - 92, btn_w, 40)
-        self.tutorial_next_button.rect.update(panel_x, board_bottom - 40, btn_w, 40)
+        self.tutorial_back_button.rect.update(panel_x, board_bottom - S(92), btn_w, S(40))
+        self.tutorial_next_button.rect.update(panel_x, board_bottom - S(40), btn_w, S(40))
         self.tutorial_back_button.draw(self.screen, self.font, mouse_pos)
         self.tutorial_next_button.draw(self.screen, self.font, mouse_pos, active=self.tutorial_pending_advance)
 
@@ -1115,7 +1115,7 @@ class App:
         panel_y = 24
         R.draw_panel(self.screen, pygame.Rect(panel_x, panel_y, panel_w, panel_h), radius=18)
 
-        title = self.font_big.render("НАСТРОЙКИ", True, config.COLOR_TEXT)
+        title = R._cached_text_surface(self.font_big, "НАСТРОЙКИ", config.COLOR_TEXT)
         self.screen.blit(title, title.get_rect(center=(cx, panel_y + S(50))))
 
         bx = cx - min(S(180), (panel_w - S(40)) // 2)
@@ -2741,8 +2741,8 @@ class App:
                 self.end_turn_button.draw(self.screen, self.font, mouse_pos)
 
         board_bottom = config.BOARD_MARGIN_Y + config.BOARD_HEIGHT * config.CELL_SIZE
-        self.skip_king_button.rect.y = board_bottom - 40 - self.skip_king_button.rect.h - 6
-        self.end_turn_button.rect.y = board_bottom - 40 - self.end_turn_button.rect.h - 6
+        self.skip_king_button.rect.y = board_bottom - S(40) - self.skip_king_button.rect.h - S(6)
+        self.end_turn_button.rect.y = board_bottom - S(40) - self.end_turn_button.rect.h - S(6)
         self.surrender_button.rect.y = board_bottom - self.surrender_button.rect.h
         self.surrender_button.draw(self.screen, self.font_small, mouse_pos)
 
@@ -2755,7 +2755,7 @@ class App:
             text = "ПОБЕДА: СОПЕРНИКА" if self.network_role else "ПОБЕДА: ИИ"
         else:
             text = "НИЧЬЯ"
-        label = self.font_big.render(text, True, config.COLOR_ACCENT)
+        label = R._cached_text_surface(self.font_big, text, config.COLOR_ACCENT)
         rect = label.get_rect(center=(config.SCREEN_WIDTH // 2, config.SCREEN_HEIGHT // 2 - 20))
         self.screen.blit(label, rect)
         if self.network_role:
@@ -3004,4 +3004,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
