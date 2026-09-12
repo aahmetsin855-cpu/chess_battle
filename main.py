@@ -252,7 +252,7 @@ class App:
         self.dismount_options = []  # доступные действия спешивания коня для выбранной фигуры
         self.dismount_armed = False  # True, пока игрок выбирает клетку для спешивания
 
-        self.animation = AnimationController(speed=self.settings.get("animation_speed", 1.0))
+        self.animation = AnimationController(speed=self.settings.get("animation_speed", config.DEFAULT_ANIMATION_SPEED))
 
         # --- Обучение ("Обучение" в главном меню) --------------------------
         # Полностью отдельный флаг верхнего уровня — НЕ self.state.phase,
@@ -824,7 +824,7 @@ class App:
         self._set_viewer_color("white")
         # Свежий контроллер анимаций — чтобы из предыдущего шага не
         # тянулась хвостом недоигранная анимация на другую расстановку.
-        self.animation = AnimationController(speed=self.settings.get("animation_speed", 1.0))
+        self.animation = AnimationController(speed=self.settings.get("animation_speed", config.DEFAULT_ANIMATION_SPEED))
         self.deselect()
         step = tutorial_mod.STEPS[index]
         sel = step.get("select")
@@ -2259,21 +2259,29 @@ class App:
         if self.surrender_button.handle_click(pos):
             self.surrender()
             return
-        if self.animation.is_blocking():
-            return
         if self.state.turn_color != self.player_color:
             return
         if self.state.phase not in ("king_stage", "lobby_stage"):
             return
 
-        if self.state.phase == "king_stage" and self.skip_king_button.handle_click(pos):
+        # Раньше любой клик во время анимации полностью игнорировался —
+        # включая ПРОСТО ВЫБОР другой своей фигуры, что на Android (где
+        # анимации хоть и укорочены, но всё ещё заметны) ощущалось так,
+        # будто игра "не успевает" за тапами. Теперь блокируем только
+        # ИСПОЛНЕНИЕ действия (см. AnimationController — она хранит одну
+        # текущую блокирующую анимацию, вторую поверх запускать нельзя),
+        # а выбор фигуры и просмотр её доступных ходов — можно всегда;
+        # само действие просто не сработает, пока can_act не станет True.
+        can_act = not self.animation.is_blocking()
+
+        if can_act and self.state.phase == "king_stage" and self.skip_king_button.handle_click(pos):
             self.deselect()
             if self.network_role:
                 self._network_end_king_stage()
             else:
                 turn_system.end_king_stage(self.state)
             return
-        if self.state.phase == "lobby_stage" and self.end_turn_button.handle_click(pos):
+        if can_act and self.state.phase == "lobby_stage" and self.end_turn_button.handle_click(pos):
             self.deselect()
             if self.network_role:
                 self._network_end_turn()
@@ -2282,7 +2290,7 @@ class App:
             return
 
         sel = self.get_selected_piece()
-        if sel is not None and sel.type == "queen":
+        if can_act and sel is not None and sel.type == "queen":
             for a in self.special_actions:
                 if a["type"] == "queen_lock":
                     btn = self.queen_lock_buttons.get(a["mode"])
@@ -2303,6 +2311,8 @@ class App:
                         return
 
         if sel is not None and self.dismount_options and self.dismount_button.handle_click(pos):
+            # Само переключение "вооружения" спешивания — не исполнение
+            # действия, а просто локальный UI-режим; можно всегда.
             self.dismount_armed = not self.dismount_armed
             return
 
@@ -2310,7 +2320,7 @@ class App:
         if cell is None:
             return
 
-        if sel is not None and self.dismount_armed:
+        if can_act and sel is not None and self.dismount_armed:
             dismount_action = next((a for a in self.dismount_options if a["target"] == cell), None)
             if dismount_action is not None:
                 if self.network_role:
@@ -2323,7 +2333,7 @@ class App:
             self.dismount_armed = False
             return
 
-        if sel is not None and cell in self.action_map:
+        if can_act and sel is not None and cell in self.action_map:
             action = self.action_map[cell]
             if self.network_role:
                 self._network_request_action(action)
@@ -2336,6 +2346,8 @@ class App:
                 self.state.winner = w
             return
 
+        # Выбор фигуры (и его подсветка доступных действий) разрешён
+        # даже во время анимации — см. can_act выше.
         piece = self.state.get_piece_at(*cell)
         if piece is not None and piece.color == self.player_color:
             if self.state.phase == "king_stage":
@@ -2833,7 +2845,7 @@ class App:
         self.ai_used_mount = False
         self.memory_saved = False
 
-        self.animation = AnimationController(speed=self.settings.get("animation_speed", 1.0))
+        self.animation = AnimationController(speed=self.settings.get("animation_speed", config.DEFAULT_ANIMATION_SPEED))
         self.timer_beeped_turn = None
         self.standard_timer_last = None
 
