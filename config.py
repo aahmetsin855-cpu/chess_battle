@@ -153,13 +153,25 @@ def set_available_area(width_px, height_px):
 
 SCREEN_WIDTH = BOARD_MARGIN_X * 2 + BOARD_WIDTH * CELL_SIZE + SIDE_PANEL_WIDTH
 SCREEN_HEIGHT = BOARD_MARGIN_Y + BOARD_HEIGHT * CELL_SIZE + 50
-FPS = 30
+FPS = 20 if platform_utils.is_android() else 30
+
+# Логическое разрешение рендера на Android (см. main.py._apply_screen_size).
+# Реальный экран телефона может быть 2400x1080+ физических пикселей —
+# рисовать в это разрешение напрямую значит платить в 3-4 раза больше за
+# КАЖДЫЙ fill/blit/draw.rect, чем нужно. SDL2 (через флаг SCALED) сам
+# растягивает готовый кадр на весь экран силами GPU, так что игра рисует
+# как в маленькое окно, а выглядит на весь экран. 1280x720 — консервативный
+# выбор в пользу производительности; при необходимости запаса резкости
+# можно поднять до 1600x900, но помнить про совет "без этого остальное
+# почти бесполезно" — производительность в приоритете перед чёткостью.
+ANDROID_LOGICAL_SIZE = (1280, 720)
 
 # Временный оверлей FPS/frame-time в углу экрана (см. main.py run()) —
 # нужен, чтобы увидеть на скриншоте с телефона, реально ли тормозит сам
-# игровой цикл, или проблема где-то ещё. Поставить False, когда причина
-# тормозов на Android найдена и подтверждена.
-DEBUG_SHOW_FPS = True
+# игровой цикл, или проблема где-то ещё. Поставить True для диагностики,
+# False — для обычной игры (сам текст тоже обновляется не каждый кадр,
+# см. main.py, но лишний код лучше не гонять зря).
+DEBUG_SHOW_FPS = False
 # Верхний предел на dt ОДНОГО кадра. Если основной поток ненадолго
 # стопорится (разбор JSON у большого снапшота состояния, разом
 # обработанная пачка сообщений, скопившихся за время лагов сети — то
@@ -258,8 +270,15 @@ COLOR_PANEL_TOP_HI = (255, 255, 255)     # верхняя грань панел�
 COLOR_BUTTON_TOP_HI = (255, 255, 255)
 
 # Частицы (искры) при попадании/смерти — количество и параметры.
-PARTICLE_COUNT_IMPACT = 8
-PARTICLE_COUNT_DEATH = 10
+# На Android держим минимум — каждая частица это отдельный draw.circle
+# каждый кадр в течение всей анимации, а таких эффектов на доске может
+# случиться сразу несколько подряд (серия ударов/смертей за один ход).
+if platform_utils.is_android():
+    PARTICLE_COUNT_IMPACT = 3
+    PARTICLE_COUNT_DEATH = 3
+else:
+    PARTICLE_COUNT_IMPACT = 8
+    PARTICLE_COUNT_DEATH = 10
 PARTICLE_SPEED = 145.0
 PARTICLE_GRAVITY = 260.0
 PARTICLE_LIFETIME = 0.42
@@ -477,11 +496,24 @@ AI_FORMATION_SAMPLES = 8         # сколько вариантов расст�
 
 # Уровни сложности для Algorithm AI. think_time — бюджет на весь ход (сек),
 # max_depth — предельная глубина поиска (в атомарных действиях).
-AI_DIFFICULTY_SETTINGS = {
-    "easy":   {"think_time": 0.6, "max_depth": 3},
-    "normal": {"think_time": 2.0, "max_depth": 6},
-    "hard":   {"think_time": 4.5, "max_depth": 9},
-}
+# На Android бюджет и глубина урезаны отдельно от desktop — мобильный
+# Python выполняет каждый узел поиска заметно медленнее, и такой же
+# think_time там реально исследует куда меньше ходов за то же время; при
+# этом сама минимакс-функция на глубоких ветках может ощутимо задержать
+# кадр между проверками дедлайна, добавляя лишнюю задержку поверх и без
+# того урезанного бюджета рендера.
+if platform_utils.is_android():
+    AI_DIFFICULTY_SETTINGS = {
+        "easy":   {"think_time": 0.4, "max_depth": 2},
+        "normal": {"think_time": 1.0, "max_depth": 4},
+        "hard":   {"think_time": 2.2, "max_depth": 6},
+    }
+else:
+    AI_DIFFICULTY_SETTINGS = {
+        "easy":   {"think_time": 0.6, "max_depth": 3},
+        "normal": {"think_time": 2.0, "max_depth": 6},
+        "hard":   {"think_time": 4.5, "max_depth": 9},
+    }
 
 # --- Локальный AI (LLM через Ollama), полностью офлайн -----------------
 # Если Ollama не установлена/не запущена — игра автоматически и без
@@ -530,4 +562,3 @@ SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 # Прочее
 # ---------------------------------------------------------------------------
 GAME_TITLE = "HP Battle Chess"
-
