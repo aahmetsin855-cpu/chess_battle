@@ -247,12 +247,15 @@ class BoardRenderer:
                 hi = config.COLOR_BOARD_LIGHT_HI if light else config.COLOR_BOARD_DARK_HI
                 lo = config.COLOR_BOARD_LIGHT_LO if light else config.COLOR_BOARD_DARK_LO
                 pygame.draw.rect(cache, base, (x, y, config.CELL_SIZE, config.CELL_SIZE))
-                # Тонкий бевел (фаска): светлее сверху/слева, темнее снизу/справа —
-                # даёт лёгкое ощущение материальности клетки без текстур.
-                pygame.draw.rect(cache, hi, (x, y, config.CELL_SIZE, bevel))
-                pygame.draw.rect(cache, hi, (x, y, bevel, config.CELL_SIZE))
-                pygame.draw.rect(cache, lo, (x, y + config.CELL_SIZE - bevel, config.CELL_SIZE, bevel))
-                pygame.draw.rect(cache, lo, (x + config.CELL_SIZE - bevel, y, bevel, config.CELL_SIZE))
+                if not config.ANDROID_LITE_VISUALS:
+                    # Тонкий бевел (фаска): светлее сверху/слева, темнее снизу/справа —
+                    # даёт лёгкое ощущение материальности клетки без текстур.
+                    # Это чисто косметика (4 доп. draw.rect на КАЖДУЮ клетку
+                    # при первой сборке кэша) — на Android отключено.
+                    pygame.draw.rect(cache, hi, (x, y, config.CELL_SIZE, bevel))
+                    pygame.draw.rect(cache, hi, (x, y, bevel, config.CELL_SIZE))
+                    pygame.draw.rect(cache, lo, (x, y + config.CELL_SIZE - bevel, config.CELL_SIZE, bevel))
+                    pygame.draw.rect(cache, lo, (x + config.CELL_SIZE - bevel, y, bevel, config.CELL_SIZE))
 
         for col in range(config.BOARD_WIDTH):
             x, y = board_to_screen(col, config.WHITE_HOME_ROW)
@@ -272,7 +275,8 @@ class BoardRenderer:
         pygame.draw.rect(cache, (98, 99, 110), (bx, by, bw, bh), 2)
 
         BoardRenderer._draw_coords(cache, bx, by, bw, bh)
-        cache.blit(_vignette_surface(config.SCREEN_WIDTH, config.SCREEN_HEIGHT), (0, 0))
+        if not config.ANDROID_LITE_VISUALS:
+            cache.blit(_vignette_surface(config.SCREEN_WIDTH, config.SCREEN_HEIGHT), (0, 0))
         return cache
 
     @staticmethod
@@ -467,24 +471,27 @@ class PieceRenderer:
         # ощущение веса и "приподнятости" силуэта над доской. Форма тени
         # зависит только от shadow_r, который на неанимированных фигурах
         # всегда один и тот же для данного CELL_SIZE — кэшируем вместо
-        # пересоздания Surface для КАЖДОЙ фигуры КАЖДЫЙ кадр.
-        shadow_r = max(4, int(r * 1.05))
-        shadow = PieceRenderer._shadow_cache.get(shadow_r)
-        if shadow is None:
-            if len(PieceRenderer._shadow_cache) > 64:
-                PieceRenderer._shadow_cache.clear()
-            shadow = pygame.Surface((shadow_r * 2 + 6, shadow_r + 8), pygame.SRCALPHA).convert_alpha()
-            pygame.draw.ellipse(shadow, (0, 0, 0, 95), (0, int(shadow_r * 0.15), shadow_r * 2, int(shadow_r * 0.9)))
-            PieceRenderer._shadow_cache[shadow_r] = shadow
-        screen.blit(shadow, (cx - shadow_r - 3, cy + int(r * 0.55)))
+        # пересоздания Surface для КАЖДОЙ фигуры КАЖДЫЙ кадр. На Android
+        # (ANDROID_LITE_VISUALS) отключена совсем — на доске с 20-30
+        # фигурами это 20-30 лишних blit'ов каждый кадр ради чистой
+        # косметики.
+        if not config.ANDROID_LITE_VISUALS:
+            shadow_r = max(4, int(r * 1.05))
+            shadow = PieceRenderer._shadow_cache.get(shadow_r)
+            if shadow is None:
+                if len(PieceRenderer._shadow_cache) > 64:
+                    PieceRenderer._shadow_cache.clear()
+                shadow = pygame.Surface((shadow_r * 2 + 6, shadow_r + 8), pygame.SRCALPHA).convert_alpha()
+                pygame.draw.ellipse(shadow, (0, 0, 0, 95), (0, int(shadow_r * 0.15), shadow_r * 2, int(shadow_r * 0.9)))
+                PieceRenderer._shadow_cache[shadow_r] = shadow
+            screen.blit(shadow, (cx - shadow_r - 3, cy + int(r * 0.55)))
 
         # Пульсирующее свечение выбранной фигуры — рисуется ДО силуэта,
-        # чтобы силуэт оставался поверх и полностью читаемым. Пульсация
-        # непрерывна по времени, но саму форму квантуем до 16 шагов —
-        # этого достаточно, чтобы глаз не заметил ступенек, зато кэш
-        # даёт реальные повторные попадания вместо нового Surface на
-        # каждый кадр (пульс иначе не повторяется НИКОГДА двумя кадрами).
-        if selected_glow:
+        # чтобы силуэт оставался поверх и полностью читаемым. На Android
+        # (ANDROID_LITE_VISUALS) отключено: сам силуэт и так меняет цвет
+        # обводки при выборе (см. outline выше), этого достаточно для
+        # обратной связи без лишнего ежекадрового эффекта.
+        if selected_glow and not config.ANDROID_LITE_VISUALS:
             glow_t = _pulse(config.SELECT_PULSE_PERIOD)
             step = round(glow_t * 16) / 16.0
             glow_r = int(r * (1.28 + 0.10 * step))
@@ -832,23 +839,24 @@ def darken_overlay(screen, alpha=210, color=(10, 10, 14)):
 
 def draw_panel(screen, rect, radius=14):
     """Нейтральная поверхность меню/HUD: один визуальный материал для всех
-    экранов — с мягкой тенью позади и тонким "стеклянным" бликом вдоль
-    верхней грани, вместо плоской заливки. Все скруглённые поверхности
-    закешированы (см. _cached_rrect_*) — иначе рисование border_radius
-    заново каждый кадр для каждой панели было одной из главных причин
-    тормозов на Android."""
+    экранов. На desktop — с мягкой тенью позади и тонким "стеклянным"
+    бликом вдоль верхней грани (4 blit'а); на Android (ANDROID_LITE_VISUALS)
+    только заливка+рамка (2 blit'а) — тень и блик там чистая косметика,
+    а панели встречаются на каждом экране меню."""
     rect = pygame.Rect(rect)
     size = (rect.width, rect.height)
 
-    shadow = _cached_rrect_fill(size, radius, (0, 0, 0, 100))
-    screen.blit(shadow, (rect.x, rect.y + 4))
+    if not config.ANDROID_LITE_VISUALS:
+        shadow = _cached_rrect_fill(size, radius, (0, 0, 0, 100))
+        screen.blit(shadow, (rect.x, rect.y + 4))
 
     fill = _cached_rrect_fill(size, radius, (*config.COLOR_PANEL_BG, 255))
     screen.blit(fill, rect.topleft)
 
-    hi_size = (rect.width, max(1, rect.height // 2))
-    hi = _cached_rrect_top_fill(hi_size, radius, (*config.COLOR_PANEL_TOP_HI, 10))
-    screen.blit(hi, rect.topleft)
+    if not config.ANDROID_LITE_VISUALS:
+        hi_size = (rect.width, max(1, rect.height // 2))
+        hi = _cached_rrect_top_fill(hi_size, radius, (*config.COLOR_PANEL_TOP_HI, 10))
+        screen.blit(hi, rect.topleft)
 
     border = _cached_rrect_border(size, radius, (*config.COLOR_PANEL_BORDER, 255), 1)
     screen.blit(border, rect.topleft)
@@ -865,7 +873,7 @@ def draw_button(screen, rect, text, font, active=False, hover=False, enabled=Tru
     fill = _cached_rrect_fill(size, 10, (*color, 255))
     screen.blit(fill, draw_rect.topleft)
 
-    if enabled:
+    if enabled and not config.ANDROID_LITE_VISUALS:
         hi_size = (draw_rect.width, max(1, draw_rect.height // 2))
         hi_alpha = 24 if active else 16
         hi = _cached_rrect_top_fill(hi_size, 10, (*config.COLOR_BUTTON_TOP_HI, hi_alpha))
