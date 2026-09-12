@@ -216,7 +216,8 @@ class App:
         # --- Настройки и память ИИ (переживают перезапуски) ---
         self.ai_memory = ai_memory.load_memory()
 
-        self.selected_board_size = self.settings.get("board_size", (config.BOARD_WIDTH, config.BOARD_HEIGHT))
+        _default_board_size = (10, 8) if platform_utils.is_android() else (config.BOARD_WIDTH, config.BOARD_HEIGHT)
+        self.selected_board_size = self.settings.get("board_size", _default_board_size)
         self.selected_game_mode = self.settings.get("game_mode", config.DEFAULT_GAME_MODE)
         config.configure_board_size(self.selected_board_size)
         self._apply_screen_size()
@@ -340,25 +341,25 @@ class App:
         if self.fullscreen:
             if force_recreate or self.screen is None:
                 if platform_utils.is_android():
-                    # На Android нет desktop-style window management (нет
-                    # чужих окон, с которыми могло бы конфликтовать
-                    # эксклюзивное переключение видеорежима, и нет
-                    # tkinter-диалога поверх игры — см. _choose_file,
-                    # которая на Android вообще не запускает subprocess).
-                    # (0, 0) — стандартный для python-for-android паттерн
-                    # "взять текущее разрешение экрана устройства", но он
-                    # работает ТОЛЬКО с голым FULLSCREEN. Флаг SCALED
-                    # требует явный ненулевой размер — с (0, 0) падает
-                    # (0, 0) — стандартный для python-for-android паттерн
-                    # "взять текущее разрешение экрана устройства".
-                    #
-                    # Ранее здесь стоял флаг SCALED (аппаратно ускоренный
-                    # SDL render-backend) в расчёте на бОльшую скорость —
-                    # но на практике улучшения это не дало, а могло быть
-                    # как-то связано с новыми визуальными артефактами.
-                    # Возвращаем обычный FULLSCREEN; ищем причину тормозов
-                    # отдельно (см. счётчик FPS в углу экрана).
-                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                    # На Android рисуем в МЕНЬШЕЕ "логическое" разрешение
+                    # (см. config.ANDROID_LOGICAL_SIZE), а не в физическое
+                    # разрешение экрана напрямую — на современных телефонах
+                    # это может быть 2400x1080+ пикселей, и КАЖДЫЙ fill/
+                    # blit/draw.rect в игре обходится втрое-вчетверо дороже,
+                    # чем должен. Флаг SCALED заставляет SDL2 растягивать
+                    # уже готовый кадр на реальный экран силами GPU — игра
+                    # просто не видит разницы и рисует как в маленькое окно.
+                    # Он же требует явный ненулевой размер (в отличие от
+                    # голого FULLSCREEN, которому подходит (0, 0) = "взять
+                    # текущее разрешение устройства").
+                    logical_w, logical_h = config.ANDROID_LOGICAL_SIZE
+                    try:
+                        self.screen = pygame.display.set_mode(
+                            (logical_w, logical_h), pygame.FULLSCREEN | pygame.SCALED)
+                    except pygame.error:
+                        # Не завелось на этом устройстве/сборке SDL — лучше
+                        # честный fullscreen в реальном разрешении, чем крах.
+                        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
                 else:
                     # ВАЖНО: используем "оконный" (borderless) fullscreen —
                     # обычное окно без рамки, растянутое на весь рабочий стол —
@@ -2655,10 +2656,13 @@ class App:
 
         if s.turn_color == self.player_color:
             if s.phase == "king_stage":
-                R.draw_text(self.screen, f"Таймер короля: {max(0, s.king_stage_timer):.1f} c",
+                # Целые секунды вместо .1f — раньше строка менялась ~10
+                # раз в секунду и почти никогда не попадала в кэш
+                # отрендеренного текста (см. renderer._cached_text_surface).
+                R.draw_text(self.screen, f"Таймер короля: {int(max(0, s.king_stage_timer))} c",
                             (panel_x, lay.take(16, gap=6)), self.font_small, config.COLOR_PLAYER_UI)
             elif s.phase == "lobby_stage":
-                R.draw_text(self.screen, f"Таймер хода: {max(0, s.main_timer):.1f} c",
+                R.draw_text(self.screen, f"Таймер хода: {int(max(0, s.main_timer))} c",
                             (panel_x, lay.take(16, gap=6)), self.font_small, config.COLOR_PLAYER_UI)
         else:
             if self.network_role:
@@ -2974,13 +2978,19 @@ class App:
                 # Временный диагностический оверлей: три числа вместо
                 # одного FPS — события+апдейт / отрисовка / flip. Это
                 # покажет, В КАКОЙ ИМЕННО стадии кадра теряется время,
-                # вместо того чтобы гадать. Выключается одной строкой в
-                # config.py, когда причина тормозов найдена.
-                events_ms = (_t_update_end - _t_frame_start) * 1000.0
-                draw_ms = (_t_draw_end - _t_update_end) * 1000.0
-                fps_text = (f"FPS:{self.clock.get_fps():4.1f}  ev+upd:{events_ms:5.1f}ms  "
-                            f"draw:{draw_ms:5.1f}ms")
-                fps_surf = R.make_font(16).render(fps_text, True, (255, 220, 80))
+                # вместо того чтобы гадать. Сам текст перерисовывается не
+                # чаще 4 раз в секунду — рендер текста каждый кадр ради
+                # диагностического оверлея добавлял свою собственную
+                # нагрузку поверх того, что он должен был измерять.
+                now = _t_draw_end
+                if now >= getattr(self, "_fps_debug_next_update", 0.0):
+                    self._fps_debug_next_update = now + 0.25
+                    events_ms = (_t_update_end - _t_frame_start) * 1000.0
+                    draw_ms = (_t_draw_end - _t_update_end) * 1000.0
+                    fps_text = (f"FPS:{self.clock.get_fps():4.1f}  ev+upd:{events_ms:5.1f}ms  "
+                                f"draw:{draw_ms:5.1f}ms")
+                    self._fps_debug_surf = R.make_font(16).render(fps_text, True, (255, 220, 80))
+                fps_surf = self._fps_debug_surf
                 bg_rect = fps_surf.get_rect(topleft=(6, 6)).inflate(10, 6)
                 pygame.draw.rect(self.screen, (0, 0, 0), bg_rect)
                 self.screen.blit(fps_surf, (bg_rect.x + 5, bg_rect.y + 3))
