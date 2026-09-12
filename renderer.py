@@ -356,12 +356,89 @@ class BoardRenderer:
 # ---------------------------------------------------------------------------
 class PieceRenderer:
     _shadow_cache = {}
+    _glow_cache = {}
 
     @staticmethod
     def _piece_colors(piece):
         if piece.color == config.PLAYER_COLOR:
             return config.COLOR_PIECE_WHITE, config.COLOR_PIECE_WHITE_OUTLINE
         return config.COLOR_PIECE_BLACK, config.COLOR_PIECE_BLACK_OUTLINE
+
+    _body_sprite_cache = {}
+
+    @staticmethod
+    def _piece_body_sprite(t, fill, outline, ow, r, detail):
+        """Готовый спрайт силуэта фигуры (без тени/блика/HP-полоски) —
+        для данной комбинации (тип, цвета, толщина обводки, радиус)
+        результат всегда один и тот же пиксель-в-пиксель. Раньше это была
+        цепочка из 2-6 вызовов draw.rect/circle/polygon НА КАЖДУЮ фигуру
+        КАЖДЫЙ кадр; теперь рисуется один раз и дальше только blit."""
+        key = (t, fill, outline, ow, r, detail)
+        sprite = PieceRenderer._body_sprite_cache.get(key)
+        if sprite is not None:
+            return sprite
+        if len(PieceRenderer._body_sprite_cache) > 256:
+            PieceRenderer._body_sprite_cache.clear()
+
+        pad = ow + 4
+        size = 2 * (r + pad)
+        surf = pygame.Surface((size, size), pygame.SRCALPHA).convert_alpha()
+        cx = cy = size // 2
+
+        if t == "pawn":
+            pygame.draw.circle(surf, fill, (cx, cy), max(3, r - 6))
+            pygame.draw.circle(surf, outline, (cx, cy), max(3, r - 6), ow)
+        elif t == "king":
+            body_r = max(6, int(r * 0.72))
+            pygame.draw.circle(surf, fill, (cx, cy), body_r)
+            pygame.draw.circle(surf, outline, (cx, cy), body_r, ow)
+            spike_top = cy - r
+            spike_bottom = cy - body_r + 2
+            spike_w = max(4, int(r * 0.20))
+            spike_rect = pygame.Rect(cx - spike_w // 2, spike_top, spike_w, max(2, spike_bottom - spike_top))
+            pygame.draw.rect(surf, fill, spike_rect)
+            pygame.draw.rect(surf, outline, spike_rect, ow)
+            bar_w = max(9, int(r * 0.46))
+            bar_h = spike_w
+            bar_y = spike_top + int((spike_bottom - spike_top) * 0.30)
+            bar_rect = pygame.Rect(cx - bar_w // 2, bar_y, bar_w, bar_h)
+            pygame.draw.rect(surf, fill, bar_rect)
+            pygame.draw.rect(surf, outline, bar_rect, ow)
+        elif t == "bishop":
+            pts = [(cx, cy - r), (cx - r, cy + r), (cx + r, cy + r)]
+            pygame.draw.polygon(surf, fill, pts)
+            pygame.draw.polygon(surf, outline, pts, ow)
+            pygame.draw.circle(surf, detail, (cx, cy - r + 6), 3)
+        elif t == "rook":
+            rr = max(9, r)
+            body = pygame.Rect(cx - rr, cy - rr, 2 * rr, 2 * rr)
+            pygame.draw.rect(surf, fill, body)
+            pygame.draw.rect(surf, outline, body, ow)
+            inset = max(4, rr // 4)
+            pygame.draw.line(surf, detail,
+                             (cx - inset, cy - inset),
+                             (cx + inset, cy - inset), max(2, ow))
+        elif t == "knight":
+            pts = [(cx - r, cy + r), (cx - r // 3, cy - r), (cx + r, cy + r // 3), (cx + r // 2, cy + r)]
+            pygame.draw.polygon(surf, fill, pts)
+            pygame.draw.polygon(surf, outline, pts, ow)
+        elif t == "queen":
+            body_half = max(8, int(r * 0.80))
+            body = pygame.Rect(cx - body_half, cy - body_half, 2 * body_half, 2 * body_half)
+            pygame.draw.rect(surf, fill, body)
+            pygame.draw.rect(surf, outline, body, ow)
+            top_y = cy - body_half
+            tooth_w = max(7, int(r * 0.36))
+            tooth_h = max(6, int(r * 0.20))
+            spacing = int(tooth_w * 0.95)
+            for off in (-1, 0, 1):
+                tx = cx + off * spacing
+                pts = [(tx - tooth_w // 2, top_y + 2), (tx, top_y - tooth_h), (tx + tooth_w // 2, top_y + 2)]
+                pygame.draw.polygon(surf, fill, pts)
+                pygame.draw.polygon(surf, outline, pts, ow)
+
+        PieceRenderer._body_sprite_cache[key] = surf
+        return surf
 
     @staticmethod
     def draw(screen, piece, font_small, selected=False, screen_pos=None, hp_override=None, scale=1.0):
@@ -402,13 +479,24 @@ class PieceRenderer:
         screen.blit(shadow, (cx - shadow_r - 3, cy + int(r * 0.55)))
 
         # Пульсирующее свечение выбранной фигуры — рисуется ДО силуэта,
-        # чтобы силуэт оставался поверх и полностью читаемым.
+        # чтобы силуэт оставался поверх и полностью читаемым. Пульсация
+        # непрерывна по времени, но саму форму квантуем до 16 шагов —
+        # этого достаточно, чтобы глаз не заметил ступенек, зато кэш
+        # даёт реальные повторные попадания вместо нового Surface на
+        # каждый кадр (пульс иначе не повторяется НИКОГДА двумя кадрами).
         if selected_glow:
             glow_t = _pulse(config.SELECT_PULSE_PERIOD)
-            glow_r = int(r * (1.28 + 0.10 * glow_t))
-            glow_alpha = int(70 + 50 * glow_t)
-            glow_s = pygame.Surface((glow_r * 2 + 4, glow_r * 2 + 4), pygame.SRCALPHA).convert_alpha()
-            pygame.draw.circle(glow_s, (*config.COLOR_SELECT_GLOW, glow_alpha), (glow_r + 2, glow_r + 2), glow_r, 3)
+            step = round(glow_t * 16) / 16.0
+            glow_r = int(r * (1.28 + 0.10 * step))
+            glow_alpha = int(70 + 50 * step)
+            glow_key = (glow_r, glow_alpha)
+            glow_s = PieceRenderer._glow_cache.get(glow_key)
+            if glow_s is None:
+                if len(PieceRenderer._glow_cache) > 32:
+                    PieceRenderer._glow_cache.clear()
+                glow_s = pygame.Surface((glow_r * 2 + 4, glow_r * 2 + 4), pygame.SRCALPHA).convert_alpha()
+                pygame.draw.circle(glow_s, (*config.COLOR_SELECT_GLOW, glow_alpha), (glow_r + 2, glow_r + 2), glow_r, 3)
+                PieceRenderer._glow_cache[glow_key] = glow_s
             screen.blit(glow_s, (cx - glow_r - 2, cy - glow_r - 2))
 
         t = piece.type
@@ -417,76 +505,8 @@ class PieceRenderer:
         # силуэте. Это НЕ цвет стороны — это нейтральный контрастный рисунок.
         detail = (48, 48, 54) if piece.color == config.PLAYER_COLOR else (218, 218, 222)
 
-        if t == "pawn":
-            pygame.draw.circle(screen, fill, (cx, cy), max(3, r - 6))
-            pygame.draw.circle(screen, outline, (cx, cy), max(3, r - 6), ow)
-        elif t == "king":
-            # Раньше король был просто кругом с крестом, НАРИСОВАННЫМ
-            # ПЛОСКО НА ПОВЕРХНОСТИ круга — это и читалось как вид сверху
-            # (будто смотришь на метку, нанесённую на крышку фишки). У
-            # остальных фигур силуэт "растёт" вверх за пределы корпуса
-            # (апекс слона, голова коня) — то есть подразумевается вид
-            # сбоку/спереди. Делаем так же: корпус чуть меньше r, а крест
-            # — отдельный силуэт-навершие, ВЫСТУПАЮЩИЙ над корпусом до
-            # той же верхней границы (cy - r), что и у слона.
-            body_r = max(6, int(r * 0.72))
-            pygame.draw.circle(screen, fill, (cx, cy), body_r)
-            pygame.draw.circle(screen, outline, (cx, cy), body_r, ow)
-            spike_top = cy - r
-            spike_bottom = cy - body_r + 2
-            spike_w = max(4, int(r * 0.20))
-            spike_rect = pygame.Rect(cx - spike_w // 2, spike_top, spike_w, max(2, spike_bottom - spike_top))
-            pygame.draw.rect(screen, fill, spike_rect)
-            pygame.draw.rect(screen, outline, spike_rect, ow)
-            bar_w = max(9, int(r * 0.46))
-            bar_h = spike_w
-            bar_y = spike_top + int((spike_bottom - spike_top) * 0.30)
-            bar_rect = pygame.Rect(cx - bar_w // 2, bar_y, bar_w, bar_h)
-            pygame.draw.rect(screen, fill, bar_rect)
-            pygame.draw.rect(screen, outline, bar_rect, ow)
-        elif t == "bishop":
-            pts = [(cx, cy - r), (cx - r, cy + r), (cx + r, cy + r)]
-            pygame.draw.polygon(screen, fill, pts)
-            pygame.draw.polygon(screen, outline, pts, ow)
-            pygame.draw.circle(screen, detail, (cx, cy - r + 6), 3)
-        elif t == "rook":
-            # Ладья в том же минималистичном стиле, что и остальные фигуры:
-            # простой квадратный силуэт без отдельной "короны".
-            rr = max(9, r)
-            body = pygame.Rect(cx - rr, cy - rr, 2 * rr, 2 * rr)
-            pygame.draw.rect(screen, fill, body)
-            pygame.draw.rect(screen, outline, body, ow)
-            # Небольшой внутренний штрих оставляет фигуру визуально живой,
-            # но не превращает её снова в сложный силуэт.
-            inset = max(4, rr // 4)
-            pygame.draw.line(screen, detail,
-                             (cx - inset, cy - inset),
-                             (cx + inset, cy - inset), max(2, ow))
-        elif t == "knight":
-            pts = [(cx - r, cy + r), (cx - r // 3, cy - r), (cx + r, cy + r // 3), (cx + r // 2, cy + r)]
-            pygame.draw.polygon(screen, fill, pts)
-            pygame.draw.polygon(screen, outline, pts, ow)
-        elif t == "queen":
-            # Корпус — квадрат, как у ладьи (роднит их как "тяжёлые"
-            # фигуры), но с фирменной короной — три зубца, выступающие
-            # НАД корпусом (тот же приём, что у слона и короля) — чтобы
-            # силуэты ферзя и ладьи не путались друг с другом несмотря
-            # на общую квадратную форму корпуса. Модель увеличена
-            # относительно первой версии — раньше ферзь выглядел заметно
-            # мельче ладьи, хотя должен быть как минимум не меньше.
-            body_half = max(8, int(r * 0.80))
-            body = pygame.Rect(cx - body_half, cy - body_half, 2 * body_half, 2 * body_half)
-            pygame.draw.rect(screen, fill, body)
-            pygame.draw.rect(screen, outline, body, ow)
-            top_y = cy - body_half
-            tooth_w = max(7, int(r * 0.36))
-            tooth_h = max(6, int(r * 0.20))
-            spacing = int(tooth_w * 0.95)
-            for off in (-1, 0, 1):
-                tx = cx + off * spacing
-                pts = [(tx - tooth_w // 2, top_y + 2), (tx, top_y - tooth_h), (tx + tooth_w // 2, top_y + 2)]
-                pygame.draw.polygon(screen, fill, pts)
-                pygame.draw.polygon(screen, outline, pts, ow)
+        body_sprite = PieceRenderer._piece_body_sprite(t, fill, outline, ow, r, detail)
+        screen.blit(body_sprite, (cx - body_sprite.get_width() // 2, cy - body_sprite.get_height() // 2))
 
         # Небольшой блик сверху-слева — недорогой способ дать силуэту
         # ощущение объёма, не отходя от плоского минималистичного стиля.
@@ -686,9 +706,10 @@ class EffectsRenderer:
             px = cx + vx * t
             py = cy + vy * t + 0.5 * config.PARTICLE_GRAVITY * t * t
             size = max(1, int(3.2 * (1 - progress)))
-            spark = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA).convert_alpha()
-            pygame.draw.circle(spark, (*color, alpha), (size, size), size)
-            screen.blit(spark, (int(px) - size, int(py) - size))
+            # pygame.draw.circle умеет альфа-блендинг прямо в цвете (r,g,b,a)
+            # без промежуточного Surface — раньше здесь на КАЖДУЮ искру
+            # (их 8-10 на один эффект) создавался новый SRCALPHA Surface.
+            pygame.draw.circle(screen, (*color, alpha), (int(px), int(py)), size)
 
     @staticmethod
     def draw_death(screen, effect):
