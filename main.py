@@ -440,27 +440,27 @@ class App:
         # main_x/panel_top синхронизированы с draw_main_menu() — там панель
         # и заголовок используют те же смещения от того же верха.
         #
-        # Раньше все отступы были жёстко зафиксированы (S(64) сверху,
-        # шаг S(68) между кнопками) в расчёте на достаточно высокий
-        # экран. При маленьком логическом разрешении на Android (см.
-        # config.ANDROID_LOGICAL_SIZE) это не помещалось по высоте —
-        # последняя кнопка ("ВЫХОД") обрезалась нижним краем экрана.
-        # Теперь при нехватке места отступы сжимаются пропорционально,
-        # а не остаются as-is с обрезкой контента.
+        # Панель центрируется по вертикали в пределах SCREEN_HEIGHT —
+        # раньше верхний отступ был жёстко зафиксирован (S(64)), из-за
+        # чего при коротком логическом экране снизу оставалось заметно
+        # больше пустого места, чем сверху. Если даже при нулевом
+        # верхнем отступе весь блок не помещается, сжимаем интервалы
+        # между кнопками, а не обрезаем контент.
         main_x = config.SCREEN_WIDTH // 2 - S(180)
         btn_h = S(52)
         n_btn = 5
-        desired_top, desired_first, desired_step = S(64), S(166), S(68)
-        bottom_margin = S(20)
-        needed = desired_first + desired_step * (n_btn - 1) + btn_h + bottom_margin
-        avail = max(1, config.SCREEN_HEIGHT - desired_top)
-        if needed > avail:
-            shrink = avail / needed
-            panel_top = max(S(12), int(desired_top * shrink))
+        desired_first, desired_step = S(166), S(68)
+        bottom_pad = S(20)
+        content_h = desired_first + desired_step * (n_btn - 1) + btn_h
+        if content_h + bottom_pad <= config.SCREEN_HEIGHT:
+            panel_top = (config.SCREEN_HEIGHT - (content_h + bottom_pad)) // 2
+            first_off, step = desired_first, desired_step
+        else:
+            panel_top = S(8)
+            avail = max(1, config.SCREEN_HEIGHT - panel_top - bottom_pad)
+            shrink = avail / content_h
             first_off = max(S(60), int(desired_first * shrink))
             step = max(btn_h + S(4), int(desired_step * shrink))
-        else:
-            panel_top, first_off, step = desired_top, desired_first, desired_step
         self.main_menu_buttons = {
             "play": Button((main_x, panel_top + first_off, S(360), btn_h), "ИГРАТЬ"),
             "network": Button((main_x, panel_top + first_off + step, S(360), btn_h), "МУЛЬТИПЛЕЕР ПО СЕТИ"),
