@@ -90,12 +90,23 @@ MAX_CELL_SIZE = 108
 # desktop-мониторе, физически крошечный на высокоплотном экране телефона.
 UI_SCALE = 1.0
 
-BOARD_MARGIN_X = 30
-BOARD_MARGIN_Y = 90
+# "Базовые" (desktop, UI_SCALE=1.0) значения — фактические
+# BOARD_MARGIN_X/Y и SIDE_PANEL_WIDTH ниже пересчитываются от них при
+# каждом изменении UI_SCALE (см. set_ui_scale). Раньше эти три константы
+# были ЖЁСТКО зафиксированы в пикселях независимо от UI_SCALE/логического
+# разрешения — при уменьшении логического экрана на Android боковая
+# панель фиксированной ширины съедала растущую ДОЛЮ экрана, из-за чего
+# сама доска на каждом следующем прогоне ужималась всё сильнее.
+_BASE_BOARD_MARGIN_X = 30
+_BASE_BOARD_MARGIN_Y = 90
+_BASE_SIDE_PANEL_WIDTH = 320
+
+BOARD_MARGIN_X = _BASE_BOARD_MARGIN_X
+BOARD_MARGIN_Y = _BASE_BOARD_MARGIN_Y
 # Текущая визуальная перспектива доски. Логика игры всегда хранит
 # координаты в единой системе; для чёрных UI разворачивает доску.
 VIEWER_COLOR = "white"
-SIDE_PANEL_WIDTH = 320
+SIDE_PANEL_WIDTH = _BASE_SIDE_PANEL_WIDTH
 
 # Резерв по краям под рамку/подписи координат и под нижнюю панель
 # кнопок при вычислении бюджета доски из доступной площади экрана.
@@ -124,17 +135,29 @@ def set_ui_scale(width_px, height_px):
     масштаб считается от отношения к этой базовой высоте, а не от
     отношения площадей/диагоналей.
     """
-    global UI_SCALE
+    global UI_SCALE, BOARD_MARGIN_X, BOARD_MARGIN_Y
+    global _LAYOUT_CHROME_W, _LAYOUT_CHROME_H
     shorter_side = min(int(width_px), int(height_px))
     if shorter_side <= 0:
         UI_SCALE = 1.0
-        return
-    # Подняли потолок с 1.6 до 2.0 — 1.6 упирался в потолок почти сразу
-    # (реальные телефонные экраны дают отношение около 1.7-1.8), и после
-    # первого прохода всё ещё казалось мелким. Риск переполнения текста за
-    # пределы кнопок remains, but ширина кнопок растёт тем же множителем
-    # (см. S() в main.py), так что раздельного разъезжания не должно быть.
-    UI_SCALE = max(1.0, min(2.0, shorter_side / 640.0))
+    else:
+        # Подняли потолок с 1.6 до 2.0 — 1.6 упирался в потолок почти сразу
+        # (реальные телефонные экраны дают отношение около 1.7-1.8), и после
+        # первого прохода всё ещё казалось мелким. Риск переполнения текста за
+        # пределы кнопок remains, but ширина кнопок растёт тем же множителем
+        # (см. S() в main.py), так что раздельного разъезжания не должно быть.
+        UI_SCALE = max(1.0, min(2.0, shorter_side / 640.0))
+
+    # Margins — тоже "дизайнерские" величины, которые должны расти вместе
+    # со всем остальным UI. SIDE_PANEL_WIDTH сюда намеренно НЕ входит —
+    # она считается отдельно, пропорционально реальной ширине экрана (см.
+    # set_available_area), а не от UI_SCALE, который на маленьком
+    # логическом разрешении Android упирается в нижний предел 1.0 и не
+    # решил бы проблему непропорционально широкой боковой панели.
+    BOARD_MARGIN_X = round(_BASE_BOARD_MARGIN_X * UI_SCALE)
+    BOARD_MARGIN_Y = round(_BASE_BOARD_MARGIN_Y * UI_SCALE)
+    _LAYOUT_CHROME_W = BOARD_MARGIN_X * 2 + SIDE_PANEL_WIDTH + 20
+    _LAYOUT_CHROME_H = BOARD_MARGIN_Y + 50
 
 
 def set_available_area(width_px, height_px):
@@ -144,9 +167,22 @@ def set_available_area(width_px, height_px):
     (или сразу вместе с) configure_board_size(), иначе CELL_SIZE не
     подхватит новый бюджет.
     """
-    global _BOARD_PIXEL_BUDGET_W, _BOARD_PIXEL_BUDGET_H
+    global _BOARD_PIXEL_BUDGET_W, _BOARD_PIXEL_BUDGET_H, SIDE_PANEL_WIDTH
+    global _LAYOUT_CHROME_W, _LAYOUT_CHROME_H
     width_px = int(width_px) if width_px else 0
     height_px = int(height_px) if height_px else 0
+
+    # Боковая панель — доля от РЕАЛЬНОЙ ширины экрана, а не фиксированные
+    # 320px. При маленьком логическом разрешении на Android (см.
+    # ANDROID_LOGICAL_SIZE) фиксированная ширина съедала непропорционально
+    # большую часть экрана (320 из 960 — уже треть!), из-за чего сама доска
+    # ужималась сильнее, чем должна была бы. 24% с разумными пределами —
+    # компромисс: HUD-текст остаётся читаемым, а доска не голодает.
+    if width_px > 0:
+        SIDE_PANEL_WIDTH = round(max(220, min(_BASE_SIDE_PANEL_WIDTH, width_px * 0.24)))
+    _LAYOUT_CHROME_W = BOARD_MARGIN_X * 2 + SIDE_PANEL_WIDTH + 20
+    _LAYOUT_CHROME_H = BOARD_MARGIN_Y + 50
+
     _BOARD_PIXEL_BUDGET_W = max(400, width_px - _LAYOUT_CHROME_W)
     _BOARD_PIXEL_BUDGET_H = max(400, height_px - _LAYOUT_CHROME_H)
 
