@@ -52,6 +52,16 @@ def make_font(size, bold=False):
     # крошечный на высокоплотном экране телефона (см. config.UI_SCALE).
     # На desktop UI_SCALE всегда 1.0, так что здесь ничего не меняется.
     scaled_size = max(1, round(size * getattr(config, "UI_SCALE", 1.0)))
+    if config.ANDROID_LITE_VISUALS:
+        # На Android кадр рисуется в маленькое логическое разрешение (см.
+        # config.ANDROID_LOGICAL_SIZE) и затем растягивается GPU на весь
+        # экран (SCALED). Мелкий текст (например 13px "второстепенного"
+        # шрифта) при таком растяжении теряет чёткость сильнее, чем
+        # крупный — у него просто меньше исходных пикселей на глиф.
+        # Нижний порог не даёт САМОМУ мелкому шрифту в игре съезжать в
+        # эту "мыльную" зону, при этом сохраняя иерархию размеров между
+        # шрифтами (все они по-прежнему масштабируются UI_SCALE).
+        scaled_size = max(scaled_size, 15)
     key = (scaled_size, bool(bold))
     font = _font_cache.get(key)
     if font is None:
@@ -73,6 +83,8 @@ _vignette_cache = {}
 
 def _coord_font():
     size = max(11, config.CELL_SIZE // 5)
+    if config.ANDROID_LITE_VISUALS:
+        size = max(size, 15)  # см. make_font — та же причина
     f = _coord_font_cache.get(size)
     if f is None:
         try:
