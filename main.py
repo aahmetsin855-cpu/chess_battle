@@ -438,17 +438,38 @@ class App:
 
         # --- Главное меню --------------------------------------------------
         # main_x/panel_top синхронизированы с draw_main_menu() — там панель
-        # и заголовок используют те же S(...)-смещения от того же верха.
+        # и заголовок используют те же смещения от того же верха.
+        #
+        # Раньше все отступы были жёстко зафиксированы (S(64) сверху,
+        # шаг S(68) между кнопками) в расчёте на достаточно высокий
+        # экран. При маленьком логическом разрешении на Android (см.
+        # config.ANDROID_LOGICAL_SIZE) это не помещалось по высоте —
+        # последняя кнопка ("ВЫХОД") обрезалась нижним краем экрана.
+        # Теперь при нехватке места отступы сжимаются пропорционально,
+        # а не остаются as-is с обрезкой контента.
         main_x = config.SCREEN_WIDTH // 2 - S(180)
-        panel_top = S(64)
+        btn_h = S(52)
+        n_btn = 5
+        desired_top, desired_first, desired_step = S(64), S(166), S(68)
+        bottom_margin = S(20)
+        needed = desired_first + desired_step * (n_btn - 1) + btn_h + bottom_margin
+        avail = max(1, config.SCREEN_HEIGHT - desired_top)
+        if needed > avail:
+            shrink = avail / needed
+            panel_top = max(S(12), int(desired_top * shrink))
+            first_off = max(S(60), int(desired_first * shrink))
+            step = max(btn_h + S(4), int(desired_step * shrink))
+        else:
+            panel_top, first_off, step = desired_top, desired_first, desired_step
         self.main_menu_buttons = {
-            "play": Button((main_x, panel_top + S(166), S(360), S(52)), "ИГРАТЬ"),
-            "network": Button((main_x, panel_top + S(234), S(360), S(52)), "МУЛЬТИПЛЕЕР ПО СЕТИ"),
-            "tutorial": Button((main_x, panel_top + S(302), S(360), S(52)), "ОБУЧЕНИЕ"),
-            "settings": Button((main_x, panel_top + S(370), S(360), S(52)), "НАСТРОЙКИ"),
-            "exit": Button((main_x, panel_top + S(438), S(360), S(52)), "ВЫХОД"),
+            "play": Button((main_x, panel_top + first_off, S(360), btn_h), "ИГРАТЬ"),
+            "network": Button((main_x, panel_top + first_off + step, S(360), btn_h), "МУЛЬТИПЛЕЕР ПО СЕТИ"),
+            "tutorial": Button((main_x, panel_top + first_off + step * 2, S(360), btn_h), "ОБУЧЕНИЕ"),
+            "settings": Button((main_x, panel_top + first_off + step * 3, S(360), btn_h), "НАСТРОЙКИ"),
+            "exit": Button((main_x, panel_top + first_off + step * 4, S(360), btn_h), "ВЫХОД"),
         }
         self._main_menu_panel_top = panel_top  # используется в draw_main_menu
+        self._main_menu_panel_bottom = panel_top + first_off + step * (n_btn - 1) + btn_h + S(16)
         # Реальные .rect у этих четырёх выставляются каждый кадр в
         # draw_settings_screen() — здесь только создаём сами объекты.
         self.settings_fullscreen_button = Button((main_x, panel_top + S(186), S(360), S(46)), "ПОЛНЫЙ ЭКРАН")
@@ -774,8 +795,9 @@ class App:
         # от одного и того же panel_top, поэтому кнопки всегда попадают
         # туда же, куда нарисована панель, независимо от UI_SCALE.
         panel_top = self._main_menu_panel_top
+        panel_h = min(S(530), self._main_menu_panel_bottom - panel_top)
         panel_w = max(S(460), min(S(640), int(config.SCREEN_WIDTH * 0.30)))
-        R.draw_panel(self.screen, pygame.Rect(cx - panel_w // 2, panel_top, panel_w, S(530)), radius=18)
+        R.draw_panel(self.screen, pygame.Rect(cx - panel_w // 2, panel_top, panel_w, panel_h), radius=18)
         title = R._cached_text_surface(self.font_big, "HP BATTLE CHESS", config.COLOR_TEXT)
         self.screen.blit(title, title.get_rect(center=(cx, panel_top + S(54))))
         sub = R._cached_text_surface(self.font_mid, "ТАКТИЧЕСКОЕ ПОЛЕ БОЯ", config.COLOR_TEXT_DIM)
@@ -1189,7 +1211,7 @@ class App:
         self.screen.fill(config.COLOR_BG)
         menu_x = self.panel_x - S(240)
         R.darken_overlay(self.screen)
-        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), S(500)), radius=16)
+        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), min(S(500), config.SCREEN_HEIGHT - S(62) - S(20))), radius=16)
         R.draw_text(self.screen, "ВЫБОР РЕЖИМА ИГРЫ", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
         R.draw_text(self.screen, "Выберите цель партии:", (menu_x, S(124)), self.font_small, config.COLOR_TEXT_DIM)
         for mode, btn in self.game_mode_buttons.items():
@@ -1231,7 +1253,7 @@ class App:
         self.screen.fill(config.COLOR_BG)
         menu_x = self.panel_x - S(240)
         R.darken_overlay(self.screen)
-        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), S(360)), radius=16)
+        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), min(S(360), config.SCREEN_HEIGHT - S(62) - S(20))), radius=16)
         R.draw_text(self.screen, "РАЗМЕР КАРТЫ", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
         R.draw_text(self.screen, "Режим: " + config.GAME_MODE_NAMES[self.selected_game_mode],
                     (menu_x, S(124)), self.font_small, config.COLOR_TEXT_DIM)
@@ -1413,7 +1435,7 @@ class App:
 
         menu_x = self.panel_x - S(240)
         R.darken_overlay(self.screen)
-        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), S(500)), radius=16)
+        R.draw_panel(self.screen, pygame.Rect(menu_x - 22, S(62), S(524), min(S(500), config.SCREEN_HEIGHT - S(62) - S(20))), radius=16)
 
         R.draw_text(self.screen, "ВЫБЕРИТЕ ПРОТИВНИКА", (menu_x, S(90)), self.font_big, config.COLOR_ACCENT)
         R.draw_text(self.screen, f"Карта: {config.BOARD_WIDTH}x{config.BOARD_HEIGHT}   "
