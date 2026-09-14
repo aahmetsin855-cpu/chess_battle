@@ -1702,6 +1702,16 @@ class App:
         else:
             self.state = next_state
             self.player_color = "white"
+        # Раньше между заменой self.state (фигуры уже в финальных
+        # позициях) и стартом анимации хода оставался зазор в один кадр
+        # игрового цикла — за это время рендер успевал показать фигуру
+        # уже на новом месте, а затем анимация откатывала её на старую
+        # клетку, чтобы заново проиграть движение. Визуально это было
+        # похоже на дёрганье/телепорт-назад-и-обратно и у своих, и у
+        # чужих фигур. Запускаем анимацию сразу, без ожидания следующего
+        # прохода run() — is_blocking() внутри по-прежнему не даст запустить
+        # новую поверх уже играющей, если очередь получила сразу пачку.
+        self._pump_network_animations()
         self.selected_piece_id = None
         self.action_map = {}
         self.special_actions = []
@@ -1782,6 +1792,11 @@ class App:
             after_snapshot = self.state.clone_light()
             for remote_action, before_state in visual_batch:
                 self.network_anim_queue.append((remote_action, before_state, after_snapshot))
+            # См. комментарий в _network_snapshot_received — тот же зазор
+            # между "состояние уже финальное" и "анимация ещё не началась"
+            # был причиной дёрганья и на стороне хоста, когда он видит
+            # действия клиента.
+            self._pump_network_animations()
 
     def _poll_network(self):
         if self.network_role == "host" and self.network_host:
@@ -1896,6 +1911,14 @@ class App:
         self.state.phase = "main_menu"
         self.network_screen = "menu"
         self.network_status = ""
+        # Сетевая партия всегда назначает подключившемуся игроку "black"
+        # (см. join_network_game) и может развернуть перспективу доски.
+        # Без сброса это состояние "утекало" в следующую игру — офлайн
+        # партия с ИИ запускалась за чёрных, а на экране расстановки
+        # фигуры игрока оказывались наверху вместо низа доски.
+        self.setup_player_color = "white"
+        self.player_color = "white"
+        self._set_viewer_color("white")
 
     def handle_local_network_click(self, pos):
         menu_x = self.panel_x - S(240)
@@ -1922,6 +1945,9 @@ class App:
                 self.close_network()
                 self.pending_network_host = False
                 self.state.phase = "main_menu"
+                self.setup_player_color = "white"
+                self.player_color = "white"
+                self._set_viewer_color("white")
                 return
         elif self.network_screen == "browser":
             if self.lan_refresh_button.handle_click(pos):
@@ -1964,6 +1990,9 @@ class App:
                 self.pending_network_host = False
                 self.network_screen = "menu"
                 self.state.phase = "main_menu"
+                self.setup_player_color = "white"
+                self.player_color = "white"
+                self._set_viewer_color("white")
 
     def handle_local_network_key(self, event):
         """Обрабатывает ТОЛЬКО управляющие клавиши (Backspace/Enter) для
